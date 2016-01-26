@@ -20,7 +20,8 @@ class matrix_market_reader
         ~matrix_market_reader() { close(); }
 
         void open(const std::string& filename);
-        void next_element(uintmax_t* row, uintmax_t* col, double* re, double* im = 0);
+        void next_element(uintmax_t* row, uintmax_t* col,
+                double* val_re, double* val_im, intmax_t* val_int);
         void close();
 
         bool c; // is complex ?
@@ -136,32 +137,32 @@ void matrix_market_reader<T>::open(const std::string& filename)
 }
 
 template <typename T>
-void matrix_market_reader<T>::next_element(uintmax_t* row, uintmax_t* col, double* re, double* im)
+void matrix_market_reader<T>::next_element(uintmax_t* row, uintmax_t* col,
+        double* val_re, double* val_im, intmax_t* val_int)
 {
     unsigned long row_, col_;
-    double re_, im_ = 0.0;
-    long int_;
+    double val_re_, val_im_;
+    intmax_t val_int_;
   
     if ((c) && (type == COMPLEX)) {
-        if (fscanf(f_, "%lu %lu %lf %lf", &row_, &col_, &re_, &im_) != 4) 
+        if (fscanf(f_, "%lu %lu %lf %lf", &row_, &col_, &val_re_, &val_im_) != 4) 
             throw std::runtime_error("Could not read matrix element.");
-        if (re) *re = re_;
-        if (im) *im = im_;
+        if (val_re) *val_re = val_re_;
+        if (val_im) *val_im = val_im_;
     }
     else if ((!c) && (type == REAL)) {
-        if (fscanf(f_, "%lu %lu %lf", &row_, &col_, &re_) != 3) 
+        if (fscanf(f_, "%lu %lu %lf", &row_, &col_, &val_re_) != 3) 
             throw std::runtime_error("Could not read matrix element.");
-        if (re) *re = re_;
+        if (val_re) *val_re = val_re_;
     }
     else if ((!c) && (type == INTEGER)) {
-        if (fscanf(f_, "%lu %lu %ld", &row_, &col_, &int_) != 3) 
+        if (fscanf(f_, "%lu %lu %ld", &row_, &col_, &val_int_) != 3) 
             throw std::runtime_error("Could not read matrix element.");
-        if (re) *re = double(int_);
+        if (val_int) *val_int = val_int_;
     }
     else if ((!c) && (type == PATTERN)) {
         if (fscanf(f_, "%lu %lu", &row_, &col_) != 2) 
             throw std::runtime_error("Could not read matrix element.");
-        if (re) *re = 1.0;
     }
     else
         throw std::runtime_error("Unsupported matrix type.");

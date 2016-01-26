@@ -6,13 +6,14 @@ CXXFLAGS = -std=c++11 -O3 -DNDEBUG
 #CXXFLAGS = -std=c++11 -O0 -g
 #CXXFLAGS = -std=c++11 -O3 -g
 
-CXXFLAGS += -I../matrix_market_utils/include
+CXXFLAGS += -I../utils/include
+CXXFLAGS += -I$(AQSORT_ROOT)/include
 
 .PHONY: all
 all: $(PROGRAMS)
 
 test-clang: test.cpp
-	clang++ $(CXXFLAGS) -fopenmp -o $@ $<
+	clang++ $(CXXFLAGS) -fopenmp -D_OPENMP -Wno-tautological-compare -o $@ $<
 
 test-gnu: test.cpp
 	g++ $(CXXFLAGS) -fopenmp -o $@ $<
