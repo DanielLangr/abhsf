@@ -1,0 +1,1 @@
+Modified to avoid "warning: deprecated conversion from string constant to ‘char*’ [-Wwrite-strings]".
