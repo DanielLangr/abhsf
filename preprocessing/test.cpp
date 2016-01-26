@@ -1,7 +1,9 @@
 #include <omp.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -57,6 +59,8 @@ void read(const std::string& filename)
             break;
     }
 
+    bool reverse_lexicographical_ordering = true;
+
     for (uintmax_t k = 0; k < nnz; k++) {
         uintmax_t row, col;
         double val_re, val_im;
@@ -83,12 +87,27 @@ void read(const std::string& filename)
             default: // prevents compiler warning
                 break;
         }
+
+        // check reverse lexicographical ordering
+        if (k > 0) {
+            if (cols[k] < cols[k - 1])
+                reverse_lexicographical_ordering = false;
+            if ((cols[k] == cols[k - 1]) && (rows[k] <= rows[k - 1]))
+                reverse_lexicographical_ordering = false;
+        }
     }
+
+    std::cout << "Reverse lexicographical ordering: ";
+    if (reverse_lexicographical_ordering)
+        std::cout << green << "YES";
+    else
+        std::cout << red << "NO";
+    std::cout << reset << std::endl;
 }
 
-void iterate(const uintmax_t bsk, int num_threads)
+template <typename Processor>
+void iterate(const uintmax_t bsk, const int num_threads, const Processor& processor)
 {
-
     // sort in parallel
     omp_set_num_threads(num_threads);
 
@@ -161,7 +180,6 @@ void iterate(const uintmax_t bsk, int num_threads)
     uintmax_t tb[num_threads + 1];
     tb[0] = 0;
     tb[num_threads] = nnz;
-    const uintmax_t s = 1UL << bsk;
 
     omp_set_num_threads(num_threads);
     #pragma omp parallel
@@ -175,11 +193,14 @@ void iterate(const uintmax_t bsk, int num_threads)
             uintmax_t J = cols[l] >> bsk;
             uintmax_t I_, J_;
 
-            do {
-                l++;
+            l++;
+            while (l < nnz) {
                 I_ = rows[l] >> bsk;
                 J_ = cols[l] >> bsk;
-            } while ((l < (nnz - 1)) && (I_ == I) && (J_ == J));
+                if ((I_ != I) || (J_ != J))
+                    break;
+                l++;
+            };
             tb[t] = l;
         }
 
@@ -189,19 +210,18 @@ void iterate(const uintmax_t bsk, int num_threads)
         uintmax_t I = rows[l1] >> bsk;
         uintmax_t J = cols[l1] >> bsk;
 
-        for (uintmax_t l = tb[t]; l < tb[t + 1] - 1; l++) {
+        for (uintmax_t l = tb[t] + 1; l < tb[t + 1]; l++) {
             uintmax_t I_ = rows[l] >> bsk;
             uintmax_t J_ = cols[l] >> bsk;
             if ((I_ != I) || (J_ != J)) {
-                // process block with indexes between l1 and (l - 1) inclusive
-
+                processor(l1, l - 1);
                 l1 = l;
                 I = I_;
                 J = J_;
             }
         }
-
-        // process block with indexes between l1 and (tb[t + 1] - 1) inclusive
+        if (l1 <= tb[t + 1] - 1)
+            processor(l1, tb[t + 1] - 1);
     }
 }
 
@@ -222,8 +242,37 @@ int main(int argc, char* argv[])
     int num_threads = std::atoi(argv[3]);
     std::cout << "Number of threads: " << cyan << num_threads << reset << std::endl;
 
+    // processor
+    std::function<void(uintmax_t, uintmax_t)> processor;
+
+    // nonzero-count processor data
+    static std::atomic<uintmax_t> nnz_count {0};
+
+    int processor_type = std::atoi(argv[4]);
+    std::cout << "Processor type: ";
+    if (processor_type == 0) {
+        // nop (do nothing) processor
+        std::cout << cyan << "do-nothing";
+        processor = [](uintmax_t i1, uintmax_t i2){};
+    }
+    else if (processor_type == 1) {
+        // chceck nonzeros processor
+        std::cout << cyan << "nonzero-count";
+        processor = [](uintmax_t i1, uintmax_t i2){ nnz_count += i2 - i1 + 1; };
+    }
+    std::cout << reset << std::endl;
+
     timer.start();
-    iterate(bsk, num_threads);
+    iterate(bsk, num_threads, processor);
     timer.stop();
-    std::cout << "Iteration over blocks: " << green << timer.seconds() << reset << std::endl;
+    std::cout << "Iteration over blocks: " << magenta << timer.seconds() << reset << " [s]" << std::endl;
+
+    if (processor_type == 1) {
+        std::cout << "Nonzeros count check: ";
+        if (nnz_count != nnz)
+            std::cout << red << "FAILED";
+        else
+            std::cout << green << "PASSED";
+        std::cout << reset << std::endl;
+    }
 }
