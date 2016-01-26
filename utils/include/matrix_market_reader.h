@@ -27,9 +27,9 @@ class matrix_market_reader
         bool h; // is Hermitian ?
         enum { PATTERN, INTEGER, REAL, COMPLEX } type;
 
-        uintmax_t m; // number of rows
-        uintmax_t n; // number of columns
-        uintmax_t z; // number of nonzeros
+        uintmax_t m;   // number of rows
+        uintmax_t n;   // number of columns
+        uintmax_t nnz; // number of nonzeros
 
     private:
         FILE* f_;
@@ -114,9 +114,9 @@ void matrix_market_reader<T>::open(const std::string& filename)
     else
         throw std::runtime_error("Only real or complex sparse matrices are supported.");
 
-    int m, n, z;
+    int m, n, nnz;
 
-    if (mm_read_mtx_crd_size(f_, &m, &n, &z) != 0) 
+    if (mm_read_mtx_crd_size(f_, &m, &n, &nnz) != 0) 
         throw std::runtime_error("Could not process matrix sizes.");
 
     if (log_) {
@@ -128,11 +128,11 @@ void matrix_market_reader<T>::open(const std::string& filename)
 
     this->m = m;
     this->n = n;
-    this->z = z;
+    this->nnz = nnz;
 
-    if (log_) *log_ << "Number of rows:             " << std::right << std::setw(20) << m << std::endl;
-    if (log_) *log_ << "Number of columns:          " << std::right << std::setw(20) << n << std::endl;
-    if (log_) *log_ << "Number of nonzero elements: " << std::right << std::setw(20) << z << std::endl;
+    if (log_) *log_ << "Number of rows:             " << std::right << std::setw(20) <<   m << std::endl;
+    if (log_) *log_ << "Number of columns:          " << std::right << std::setw(20) <<   n << std::endl;
+    if (log_) *log_ << "Number of nonzero elements: " << std::right << std::setw(20) << nnz << std::endl;
 }
 
 template <typename T>
@@ -156,7 +156,7 @@ void matrix_market_reader<T>::next_element(uintmax_t* row, uintmax_t* col, doubl
     else if ((!c) && (type == INTEGER)) {
         if (fscanf(f_, "%lu %lu %ld", &row_, &col_, &int_) != 3) 
             throw std::runtime_error("Could not read matrix element.");
-        if (re) *re = static_cast<double>(int_);
+        if (re) *re = double(int_);
     }
     else if ((!c) && (type == PATTERN)) {
         if (fscanf(f_, "%lu %lu", &row_, &col_) != 2) 
@@ -166,8 +166,8 @@ void matrix_market_reader<T>::next_element(uintmax_t* row, uintmax_t* col, doubl
     else
         throw std::runtime_error("Unsupported matrix type.");
 
-    *row = static_cast<uintmax_t>(row_);
-    *col = static_cast<uintmax_t>(col_);
+    *row = uintmax_t(row_);
+    *col = uintmax_t(col_);
 }
 
 template <typename T>

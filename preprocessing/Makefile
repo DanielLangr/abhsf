@@ -6,6 +6,8 @@ CXXFLAGS = -std=c++11 -O3 -DNDEBUG
 #CXXFLAGS = -std=c++11 -O0 -g
 #CXXFLAGS = -std=c++11 -O3 -g
 
+CXXFLAGS += -I../matrix_market_utils/include
+
 .PHONY: all
 all: $(PROGRAMS)
 
