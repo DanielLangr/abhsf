@@ -171,6 +171,7 @@ void iterate(const uintmax_t bsk, const int num_threads, const Processor& proces
         return false;
     };
 
+    timer_type timer(timer_type::start_now);
     switch (type) {
         case PATTERN:
             {
@@ -224,6 +225,10 @@ void iterate(const uintmax_t bsk, const int num_threads, const Processor& proces
             }
             break;
     }
+    timer.stop();
+    std::cout << "Sorting time:     " << magenta
+        << std::fixed << std::setprecision(4) << std::setw(8)
+        << timer.seconds() << reset << " [s]" << std::endl;
 
     // iterate in parallel
     uintmax_t tb[num_threads + 1];
@@ -231,6 +236,8 @@ void iterate(const uintmax_t bsk, const int num_threads, const Processor& proces
     tb[num_threads] = nnz;
 
     omp_set_num_threads(num_threads);
+
+    timer.start();
     #pragma omp parallel
     {
         int t = omp_get_thread_num();
@@ -272,6 +279,10 @@ void iterate(const uintmax_t bsk, const int num_threads, const Processor& proces
         if (l1 <= tb[t + 1] - 1)
             processor(l1, tb[t + 1] - 1);
     }
+    timer.stop();
+    std::cout << "Iteration time:   " << magenta
+        << std::fixed << std::setprecision(4) << std::setw(8)
+        << timer.seconds() << reset << " [s]" << std::endl;
 }
 
 void checksum()
@@ -305,7 +316,7 @@ int main(int argc, char* argv[])
     else
         throw std::runtime_error("Unknown file format");
     timer.stop();
-    std::cout << "Matrix reading time: " << yellow << timer.seconds() << reset << " [s]" << std::endl;
+    std::cout << "Matrix reading time: " << magenta << timer.seconds() << reset << " [s]" << std::endl;
 
     const uintmax_t bsk = std::atoi(argv[2]);
     std::cout << "Block size power: " << cyan << bsk << reset << std::endl;
@@ -363,7 +374,9 @@ int main(int argc, char* argv[])
     timer.start();
     iterate(bsk, num_threads, processor);
     timer.stop();
-    std::cout << "Iteration over blocks: " << magenta << timer.seconds() << reset << " [s]" << std::endl;
+    std::cout << "Overall time:     " << yellow
+        << std::fixed << std::setprecision(4) << std::setw(8)
+        << timer.seconds() << reset << " [s]" << std::endl;
 
     if (processor_type == 1) {
         std::cout << "Nonzeros count check: ";
