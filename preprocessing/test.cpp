@@ -226,7 +226,7 @@ void iterate(const uintmax_t bsk, const int num_threads, const Processor& proces
             break;
     }
     timer.stop();
-    std::cout << "Sorting time:     " << magenta
+    std::cout << "Sorting time:     " << yellow
         << std::fixed << std::setprecision(4) << std::setw(8)
         << timer.seconds() << reset << " [s]" << std::endl;
 
@@ -280,7 +280,7 @@ void iterate(const uintmax_t bsk, const int num_threads, const Processor& proces
             processor(l1, tb[t + 1] - 1);
     }
     timer.stop();
-    std::cout << "Iteration time:   " << magenta
+    std::cout << "Iteration time:   " << yellow
         << std::fixed << std::setprecision(4) << std::setw(8)
         << timer.seconds() << reset << " [s]" << std::endl;
 }
@@ -316,11 +316,17 @@ int main(int argc, char* argv[])
     else
         throw std::runtime_error("Unknown file format");
     timer.stop();
-    std::cout << "Matrix reading time: " << magenta << timer.seconds() << reset << " [s]" << std::endl;
+    std::cout << "Matrix reading time: " << yellow << timer.seconds() << reset << " [s]" << std::endl;
 
-    const uintmax_t bsk = std::atoi(argv[2]);
-    std::cout << "Block size power: " << cyan << bsk << reset << std::endl;
-    std::cout << "Block size: " << cyan << (1 << bsk) << reset <<std::endl;
+    uintmax_t bsk = std::atoi(argv[2]);
+    if (bsk == 0) {
+        std::cout << "Block size power: " << cyan << "1, 2, ..., 10" << reset << std::endl;
+        std::cout << "Block size: " << cyan << "2, 4, ..., 1024" << reset << std::endl;
+    }
+    else {
+        std::cout << "Block size power: " << cyan << bsk << reset << std::endl;
+        std::cout << "Block size: " << cyan << (1 << bsk) << reset <<std::endl;
+    }
 
     int num_threads = std::atoi(argv[3]);
     std::cout << "Number of threads: " << cyan << num_threads << reset << std::endl;
@@ -371,10 +377,20 @@ int main(int argc, char* argv[])
 
     checksum();
 
+    // iterations
     timer.start();
-    iterate(bsk, num_threads, processor);
+
+    if (bsk == 0) {
+        for (bsk = 1; bsk <= 10; bsk++) {
+            std::cout << "Tested block size: " << magenta << (1 << bsk) << reset << std::endl;
+            iterate(bsk, num_threads, processor);
+        }
+    }
+    else 
+        iterate(bsk, num_threads, processor);
     timer.stop();
-    std::cout << "Overall time:     " << yellow
+
+    std::cout << "Overall time:     " << green
         << std::fixed << std::setprecision(4) << std::setw(8)
         << timer.seconds() << reset << " [s]" << std::endl;
 
