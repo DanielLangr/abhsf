@@ -151,5 +151,5 @@ int main(int argc, char* argv[])
     timer.start();
     write(filename);
     timer.stop();
-    std::cout << "Matrix reading time: " << cyan << timer.seconds() << reset << " [s]" << std::endl;
+    std::cout << "Matrix writing time: " << cyan << timer.seconds() << reset << " [s]" << std::endl;
 }
