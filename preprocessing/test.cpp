@@ -273,46 +273,91 @@ void iterate(const uintmax_t bsk, const uintmax_t s, const int num_threads, cons
     omp_set_num_threads(num_threads);
 
     timer.start();
-    #pragma omp parallel
-    {
-        int t = omp_get_thread_num();
+    if (bsk > 0) {
+        #pragma omp parallel
+        {
+            int t = omp_get_thread_num();
 
-        // find boundaries for threads
-        if (t > 0) {
-            uintmax_t l = (nnz * t) / num_threads;
-            uintmax_t I = rows[l] >> bsk;
-            uintmax_t J = cols[l] >> bsk;
-            uintmax_t I_, J_;
+            // find boundaries for threads
+            if (t > 0) {
+                uintmax_t l = (nnz * t) / num_threads;
+                uintmax_t I = rows[l] >> bsk;
+                uintmax_t J = cols[l] >> bsk;
+                uintmax_t I_, J_;
 
-            l++;
-            while (l < nnz) {
-                I_ = rows[l] >> bsk;
-                J_ = cols[l] >> bsk;
-                if ((I_ != I) || (J_ != J))
-                    break;
                 l++;
-            };
-            tb[t] = l;
-        }
-
-        #pragma omp barrier
-
-        uintmax_t l1 = tb[t];
-        uintmax_t I = rows[l1] >> bsk;
-        uintmax_t J = cols[l1] >> bsk;
-
-        for (uintmax_t l = tb[t] + 1; l < tb[t + 1]; l++) {
-            uintmax_t I_ = rows[l] >> bsk;
-            uintmax_t J_ = cols[l] >> bsk;
-            if ((I_ != I) || (J_ != J)) {
-                processor(l1, l - 1);
-                l1 = l;
-                I = I_;
-                J = J_;
+                while (l < nnz) {
+                    I_ = rows[l] >> bsk;
+                    J_ = cols[l] >> bsk;
+                    if ((I_ != I) || (J_ != J))
+                        break;
+                    l++;
+                };
+                tb[t] = l;
             }
+
+            #pragma omp barrier
+
+            uintmax_t l1 = tb[t];
+            uintmax_t I = rows[l1] >> bsk;
+            uintmax_t J = cols[l1] >> bsk;
+
+            for (uintmax_t l = tb[t] + 1; l < tb[t + 1]; l++) {
+                uintmax_t I_ = rows[l] >> bsk;
+                uintmax_t J_ = cols[l] >> bsk;
+                if ((I_ != I) || (J_ != J)) {
+                    processor(l1, l - 1);
+                    l1 = l;
+                    I = I_;
+                    J = J_;
+                }
+            }
+            if (l1 <= tb[t + 1] - 1)
+                processor(l1, tb[t + 1] - 1);
         }
-        if (l1 <= tb[t + 1] - 1)
-            processor(l1, tb[t + 1] - 1);
+    }
+    else {
+        #pragma omp parallel
+        {
+            int t = omp_get_thread_num();
+
+            // find boundaries for threads
+            if (t > 0) {
+                uintmax_t l = (nnz * t) / num_threads;
+                uintmax_t I = rows[l] / s;
+                uintmax_t J = cols[l] / s;
+                uintmax_t I_, J_;
+
+                l++;
+                while (l < nnz) {
+                    I_ = rows[l] / s; 
+                    J_ = cols[l] / s;
+                    if ((I_ != I) || (J_ != J))
+                        break;
+                    l++;
+                };
+                tb[t] = l;
+            }
+
+            #pragma omp barrier
+
+            uintmax_t l1 = tb[t];
+            uintmax_t I = rows[l1] / s;
+            uintmax_t J = cols[l1] / s;
+
+            for (uintmax_t l = tb[t] + 1; l < tb[t + 1]; l++) {
+                uintmax_t I_ = rows[l] / s;
+                uintmax_t J_ = cols[l] / s;
+                if ((I_ != I) || (J_ != J)) {
+                    processor(l1, l - 1);
+                    l1 = l;
+                    I = I_;
+                    J = J_;
+                }
+            }
+            if (l1 <= tb[t + 1] - 1)
+                processor(l1, tb[t + 1] - 1);
+        }
     }
     timer.stop();
     std::cout << "Iteration time:   " << yellow
