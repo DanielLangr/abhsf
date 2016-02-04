@@ -34,6 +34,24 @@ std::vector<uint32_t> rows, cols;
 std::vector<double> vals_re, vals_im;
 std::vector<int64_t> vals_int;
 
+class abhsf_structure_memory_footprint_processor
+{
+    public:
+        abhsf_structure_memory_footprint_processor(uintmax_t b, uintmax_t s) 
+            : b_(b), s_(s)
+        {
+        }
+
+        void operator()(uintmax_t i1, uintmax_t i2)
+        {
+        }
+
+    private:
+        uintmax_t b_;
+        uintmax_t s_;
+        uintmax_t M_, N_;
+};
+
 void read_mtx(const std::string& filename) 
 {
     matrix_market_reader<> reader;
@@ -155,7 +173,7 @@ void read_mm(const std::string& filename)
 }
 
 template <typename Processor>
-void iterate_bsk(const uintmax_t bsk, const int num_threads, const Processor& processor)
+void iterate_bsk(const uintmax_t bsk, const int num_threads, Processor& processor)
 {
     // sort in parallel
     omp_set_num_threads(num_threads);
@@ -286,7 +304,7 @@ void iterate_bsk(const uintmax_t bsk, const int num_threads, const Processor& pr
 }
 
 template <typename Processor>
-void iterate_s(const uintmax_t s, const int num_threads, const Processor& processor)
+void iterate_s(const uintmax_t s, const int num_threads, Processor& processor)
 {
     // sort in parallel
     omp_set_num_threads(num_threads);
@@ -473,41 +491,37 @@ int main(int argc, char* argv[])
     int num_threads = std::atoi(argv[3]);
     std::cout << "Number of threads: " << cyan << num_threads << reset << std::endl;
 
-    // processor
-    std::function<void(uintmax_t, uintmax_t)> processor;
-
-    // nonzero-count processor data
-    static std::atomic<uintmax_t> nnz_count {0};
-
+    // processor type
     int processor_type = std::atoi(argv[4]);
     std::cout << "Processor type: ";
-    if (processor_type == 0) {
-        // nop (do nothing) processor
+    if (processor_type == 0) 
         std::cout << cyan << "do-nothing";
-        processor = [](uintmax_t i1, uintmax_t i2){};
-    }
-    else if (processor_type == 1) {
-        // chceck nonzeros processor
+    else if (processor_type == 1) 
         std::cout << cyan << "nonzero-count";
-        processor = [](uintmax_t i1, uintmax_t i2){ nnz_count += i2 - i1 + 1; };
-    }
+    else if (processor_type == 2) 
+        std::cout << cyan << "ABHSF structure memory footprint";
     std::cout << reset << std::endl;
 
+    uintmax_t b;
     std::cout << "Matrix type: " << cyan << (m == n ? "SQUARE, " : "RECTANBULAR, ");
     switch (type) {
         case PATTERN:
+            b = 0;
             std::cout << "PATTERN, " << (h ? "SYMMETRIC" : "UNSYMMETRIC");
             break;
 
         case INTEGER:
+            b = 64;
             std::cout << "INTEGER, " << (h ? "SYMMETRIC" : "UNSYMMETRIC");
             break;
 
         case REAL:
+            b = 64;
             std::cout << "REAL, " << (h ? "SYMMETRIC" : "UNSYMMETRIC");
             break;
 
         case COMPLEX:
+            b = 128;
             std::cout << "COMPLEX, " << (h ? "HERMITIAN" : "UNSYMMETRIC");
             break;
     }
@@ -519,20 +533,59 @@ int main(int argc, char* argv[])
 
     checksum();
 
+    // nonzero-count processor data
+    static std::atomic<uintmax_t> nnz_count {0};
+
     // iterations
     timer.start();
 
     if (s == 0) {
         for (bsk = 1; bsk <= 10; bsk++) {
             std::cout << "Tested block size: " << magenta << (1 << bsk) << reset << std::endl;
-            iterate_bsk(bsk, num_threads, processor);
+            if (processor_type == 0) {
+                auto processor = [](uintmax_t i1, uintmax_t i2){};
+                iterate_bsk(bsk, num_threads, processor);
+            }
+            else if (processor_type == 2) {
+                s = 1UL << bsk;
+                abhsf_structure_memory_footprint_processor processor(b, s);
+                iterate_bsk(bsk, num_threads, processor);
+            }
+            else 
+                throw std::runtime_error("Unsupported processor type");
         }
     }
     else {
-        if (bsk > 0)
-            iterate_bsk(bsk, num_threads, processor);
-        else 
-            iterate_s(s, num_threads, processor);
+        if (bsk > 0) {
+            if (processor_type == 0) {
+                auto processor = [](uintmax_t i1, uintmax_t i2){};
+                iterate_bsk(bsk, num_threads, processor); 
+            }
+            else if (processor_type == 1) {
+                auto processor = [](uintmax_t i1, uintmax_t i2){ nnz_count += i2 - i1 + 1; };
+                iterate_bsk(bsk, num_threads, processor);
+            }
+            else if (processor_type == 2) {
+                s = 1UL << bsk;
+                abhsf_structure_memory_footprint_processor processor(b, s);
+                iterate_bsk(bsk, num_threads, processor);
+            }
+            else 
+                throw std::runtime_error("Unsupported processor type");
+        }
+        else {
+            if (processor_type == 0)
+            {
+                auto processor = [](uintmax_t i1, uintmax_t i2){};
+                iterate_s(s, num_threads, processor);
+            }
+            else if (processor_type == 1) {
+                auto processor = [](uintmax_t i1, uintmax_t i2){ nnz_count += i2 - i1 + 1; };
+                iterate_s(s, num_threads, processor);
+            }
+            else 
+                throw std::runtime_error("Unsupported processor type");
+        }
     }
     timer.stop();
 
