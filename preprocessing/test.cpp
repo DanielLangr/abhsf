@@ -1,6 +1,7 @@
 #include <omp.h>
 
 #include <atomic>
+#include <cassert>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
@@ -37,19 +38,76 @@ std::vector<int64_t> vals_int;
 class abhsf_structure_memory_footprint_processor
 {
     public:
-        abhsf_structure_memory_footprint_processor(uintmax_t b, uintmax_t s) 
-            : b_(b), s_(s)
+        abhsf_structure_memory_footprint_processor(uintmax_t b, uintmax_t s, int num_threads) 
+            : b_(b), s_(s), smf_(num_threads, 0)
         {
+            M_ = m / s;
+            if (m % s)
+                M_++;
+            N_ = n / s;
+            if (n % s) 
+                N_++;
+            k_ = log2(s);
+            uintmax_t ss_ = s * s;
+            uintmax_t log2_MN2_ = log2(M_) + log2(N_) + 2;
+            uintmax_t log2_ss_ = log2(ss_);
+            coo_fixed_ = log2_MN2_ + log2_ss_;
+            csr_fixed_ = log2_MN2_ + (s + 1) * log2_ss_;
+            bitmap_fixed_ = log2_MN2_ + ss_;
         }
 
-        void operator()(uintmax_t i1, uintmax_t i2)
+        void operator()(uintmax_t i1, uintmax_t i2, int t)
         {
+            uintmax_t z = i2 - i1 + 1;
+
+            uintmax_t coo = 2 * k_ * z + coo_fixed_;
+            uintmax_t min = coo;
+
+            uintmax_t csr = k_ * z + csr_fixed_;
+            if (csr < min)
+                min = csr;
+
+            uintmax_t bitmap = bitmap_fixed_;
+            if (bitmap < min)
+                min = bitmap;
+
+            if (type != PATTERN) {
+                uintmax_t dense = (ss_ - z) * b_;
+                if (dense < min)
+                    min = dense;
+            }
+
+            smf_[t] += min;
+        }
+
+        uintmax_t smf()
+        {
+            uintmax_t temp = 0;
+            for (auto i : smf_)
+                temp += i;
+            return temp;
         }
 
     private:
+        uintmax_t log2(uintmax_t arg)
+        {
+            assert(arg > 0);
+
+            uintmax_t exp = 0;
+            while ((arg >> exp) != 0)
+                exp++;
+            if ((arg & (arg - 1)) == 0)
+                exp--;
+            return exp;
+        }
+
         uintmax_t b_;
         uintmax_t s_;
+        uintmax_t k_;
         uintmax_t M_, N_;
+        uintmax_t coo_fixed_, csr_fixed_, bitmap_fixed_, ss_;
+
+        std::vector<uintmax_t> smf_;
 };
 
 void read_mtx(const std::string& filename) 
@@ -288,14 +346,14 @@ void iterate_bsk(const uintmax_t bsk, const int num_threads, Processor& processo
             uintmax_t I_ = rows[l] >> bsk;
             uintmax_t J_ = cols[l] >> bsk;
             if ((I_ != I) || (J_ != J)) {
-                processor(l1, l - 1);
+                processor(l1, l - 1, t);
                 l1 = l;
                 I = I_;
                 J = J_;
             }
         }
         if (l1 <= tb[t + 1] - 1)
-            processor(l1, tb[t + 1] - 1);
+            processor(l1, tb[t + 1] - 1, t);
     }
     timer.stop();
     std::cout << "Iteration time:   " << yellow
@@ -419,14 +477,14 @@ void iterate_s(const uintmax_t s, const int num_threads, Processor& processor)
             uintmax_t I_ = rows[l] / s;
             uintmax_t J_ = cols[l] / s;
             if ((I_ != I) || (J_ != J)) {
-                processor(l1, l - 1);
+                processor(l1, l - 1, t);
                 l1 = l;
                 I = I_;
                 J = J_;
             }
         }
         if (l1 <= tb[t + 1] - 1)
-            processor(l1, tb[t + 1] - 1);
+            processor(l1, tb[t + 1] - 1, t);
     }
     timer.stop();
     std::cout << "Iteration time:   " << yellow
@@ -543,13 +601,15 @@ int main(int argc, char* argv[])
         for (bsk = 1; bsk <= 10; bsk++) {
             std::cout << "Tested block size: " << magenta << (1 << bsk) << reset << std::endl;
             if (processor_type == 0) {
-                auto processor = [](uintmax_t i1, uintmax_t i2){};
+                auto processor = [](uintmax_t, uintmax_t, int){};
                 iterate_bsk(bsk, num_threads, processor);
             }
             else if (processor_type == 2) {
                 s = 1UL << bsk;
-                abhsf_structure_memory_footprint_processor processor(b, s);
+                abhsf_structure_memory_footprint_processor processor(b, s, num_threads);
                 iterate_bsk(bsk, num_threads, processor);
+                std::cout << "Structure memory footprint: " << cyan << processor.smf()
+                    << reset << " [bits]" << std::endl;
             }
             else 
                 throw std::runtime_error("Unsupported processor type");
@@ -558,17 +618,19 @@ int main(int argc, char* argv[])
     else {
         if (bsk > 0) {
             if (processor_type == 0) {
-                auto processor = [](uintmax_t i1, uintmax_t i2){};
+                auto processor = [](uintmax_t, uintmax_t, int){};
                 iterate_bsk(bsk, num_threads, processor); 
             }
             else if (processor_type == 1) {
-                auto processor = [](uintmax_t i1, uintmax_t i2){ nnz_count += i2 - i1 + 1; };
+                auto processor = [](uintmax_t i1, uintmax_t i2, int){ nnz_count += i2 - i1 + 1; };
                 iterate_bsk(bsk, num_threads, processor);
             }
             else if (processor_type == 2) {
                 s = 1UL << bsk;
-                abhsf_structure_memory_footprint_processor processor(b, s);
+                abhsf_structure_memory_footprint_processor processor(b, s, num_threads);
                 iterate_bsk(bsk, num_threads, processor);
+                std::cout << "Structure memory footprint: " << cyan << processor.smf()
+                    << reset << " [bits]" << std::endl;
             }
             else 
                 throw std::runtime_error("Unsupported processor type");
@@ -576,11 +638,11 @@ int main(int argc, char* argv[])
         else {
             if (processor_type == 0)
             {
-                auto processor = [](uintmax_t i1, uintmax_t i2){};
+                auto processor = [](uintmax_t, uintmax_t, int){};
                 iterate_s(s, num_threads, processor);
             }
             else if (processor_type == 1) {
-                auto processor = [](uintmax_t i1, uintmax_t i2){ nnz_count += i2 - i1 + 1; };
+                auto processor = [](uintmax_t i1, uintmax_t i2, int){ nnz_count += i2 - i1 + 1; };
                 iterate_s(s, num_threads, processor);
             }
             else 
