@@ -463,7 +463,7 @@ int main(int argc, char* argv[])
                 bsk++;
         }
 
-        std::cout << "Block size: " << cyan << (1 << bsk) << reset <<std::endl;
+        std::cout << "Block size: " << cyan << s << reset <<std::endl;
         if (bsk > 0) 
             std::cout << "Block size power: " << cyan << bsk << reset << std::endl;
         else
