@@ -155,12 +155,12 @@ void read_mm(const std::string& filename)
 }
 
 template <typename Processor>
-void iterate(const uintmax_t bsk, const uintmax_t s, const int num_threads, const Processor& processor)
+void iterate_bsk(const uintmax_t bsk, const int num_threads, const Processor& processor)
 {
     // sort in parallel
     omp_set_num_threads(num_threads);
 
-    auto comp_bsk = [bsk](std::size_t i, std::size_t j) {
+    auto comp = [bsk](std::size_t i, std::size_t j) {
         uintmax_t Ii = rows[i] >> bsk;
         uintmax_t Ij = rows[j] >> bsk;
         uintmax_t Ji = cols[i] >> bsk;
@@ -171,7 +171,127 @@ void iterate(const uintmax_t bsk, const uintmax_t s, const int num_threads, cons
         return false;
     };
 
-    auto comp_s = [s](std::size_t i, std::size_t j) {
+    timer_type timer(timer_type::start_now);
+    switch (type) {
+        case PATTERN:
+            {
+                auto swap_pat = [](std::size_t i, std::size_t j) {
+                    std::swap(rows[i], rows[j]);
+                    std::swap(cols[i], cols[j]);
+                };
+
+                #pragma omp parallel 
+                aqsort::parallel_sort(nnz, &comp, &swap_pat);
+            }
+            break;
+
+        case INTEGER:
+            {
+                auto swap_int = [](std::size_t i, std::size_t j) {
+                    std::swap(rows[i], rows[j]);
+                    std::swap(cols[i], cols[j]);
+                    std::swap(vals_int[i], vals_int[j]);
+                };
+
+                #pragma omp parallel 
+                aqsort::parallel_sort(nnz, &comp, &swap_int);
+            }
+            break;
+
+        case REAL:
+            {
+                auto swap_real = [](std::size_t i, std::size_t j) {
+                    std::swap(rows[i], rows[j]);
+                    std::swap(cols[i], cols[j]);
+                    std::swap(vals_re[i], vals_re[j]);
+                };
+
+                #pragma omp parallel 
+                aqsort::parallel_sort(nnz, &comp, &swap_real);
+            }
+            break;
+
+        case COMPLEX:
+            {
+                auto swap_comp = [](std::size_t i, std::size_t j) {
+                    std::swap(rows[i], rows[j]);
+                    std::swap(cols[i], cols[j]);
+                    std::swap(vals_re[i], vals_re[j]);
+                    std::swap(vals_im[i], vals_im[j]);
+                };
+
+                #pragma omp parallel 
+                aqsort::parallel_sort(nnz, &comp, &swap_comp);
+            }
+            break;
+    }
+    timer.stop();
+    std::cout << "Sorting time:     " << yellow
+        << std::fixed << std::setprecision(4) << std::setw(8)
+        << timer.seconds() << reset << " [s]" << std::endl;
+
+    // iterate in parallel
+    uintmax_t tb[num_threads + 1];
+    tb[0] = 0;
+    tb[num_threads] = nnz;
+
+    omp_set_num_threads(num_threads);
+
+    timer.start();
+    #pragma omp parallel
+    {
+        int t = omp_get_thread_num();
+
+        // find boundaries for threads
+        if (t > 0) {
+            uintmax_t l = (nnz * t) / num_threads;
+            uintmax_t I = rows[l] >> bsk;
+            uintmax_t J = cols[l] >> bsk;
+            uintmax_t I_, J_;
+
+            l++;
+            while (l < nnz) {
+                I_ = rows[l] >> bsk;
+                J_ = cols[l] >> bsk;
+                if ((I_ != I) || (J_ != J))
+                    break;
+                l++;
+            };
+            tb[t] = l;
+        }
+
+        #pragma omp barrier
+
+        uintmax_t l1 = tb[t];
+        uintmax_t I = rows[l1] >> bsk;
+        uintmax_t J = cols[l1] >> bsk;
+
+        for (uintmax_t l = tb[t] + 1; l < tb[t + 1]; l++) {
+            uintmax_t I_ = rows[l] >> bsk;
+            uintmax_t J_ = cols[l] >> bsk;
+            if ((I_ != I) || (J_ != J)) {
+                processor(l1, l - 1);
+                l1 = l;
+                I = I_;
+                J = J_;
+            }
+        }
+        if (l1 <= tb[t + 1] - 1)
+            processor(l1, tb[t + 1] - 1);
+    }
+    timer.stop();
+    std::cout << "Iteration time:   " << yellow
+        << std::fixed << std::setprecision(4) << std::setw(8)
+        << timer.seconds() << reset << " [s]" << std::endl;
+}
+
+template <typename Processor>
+void iterate_s(const uintmax_t s, const int num_threads, const Processor& processor)
+{
+    // sort in parallel
+    omp_set_num_threads(num_threads);
+
+    auto comp = [s](std::size_t i, std::size_t j) {
         uintmax_t Ii = rows[i] / s;
         uintmax_t Ij = rows[j] / s;
         uintmax_t Ji = cols[i] / s;
@@ -191,14 +311,8 @@ void iterate(const uintmax_t bsk, const uintmax_t s, const int num_threads, cons
                     std::swap(cols[i], cols[j]);
                 };
 
-                if (bsk > 0) {
-                    #pragma omp parallel 
-                    aqsort::parallel_sort(nnz, &comp_bsk, &swap_pat);
-                }
-                else {
-                    #pragma omp parallel 
-                    aqsort::parallel_sort(nnz, &comp_s, &swap_pat);
-                }
+                #pragma omp parallel 
+                aqsort::parallel_sort(nnz, &comp, &swap_pat);
             }
             break;
 
@@ -210,14 +324,8 @@ void iterate(const uintmax_t bsk, const uintmax_t s, const int num_threads, cons
                     std::swap(vals_int[i], vals_int[j]);
                 };
 
-                if (bsk > 0) {
-                    #pragma omp parallel 
-                    aqsort::parallel_sort(nnz, &comp_bsk, &swap_int);
-                }
-                else {
-                    #pragma omp parallel 
-                    aqsort::parallel_sort(nnz, &comp_s, &swap_int);
-                }
+                #pragma omp parallel 
+                aqsort::parallel_sort(nnz, &comp, &swap_int);
             }
             break;
 
@@ -229,14 +337,8 @@ void iterate(const uintmax_t bsk, const uintmax_t s, const int num_threads, cons
                     std::swap(vals_re[i], vals_re[j]);
                 };
 
-                if (bsk > 0) {
-                    #pragma omp parallel 
-                    aqsort::parallel_sort(nnz, &comp_bsk, &swap_real);
-                }
-                else {
-                    #pragma omp parallel 
-                    aqsort::parallel_sort(nnz, &comp_s, &swap_real);
-                }
+                #pragma omp parallel 
+                aqsort::parallel_sort(nnz, &comp, &swap_real);
             }
             break;
 
@@ -249,14 +351,8 @@ void iterate(const uintmax_t bsk, const uintmax_t s, const int num_threads, cons
                     std::swap(vals_im[i], vals_im[j]);
                 };
 
-                if (bsk > 0) {
-                    #pragma omp parallel 
-                    aqsort::parallel_sort(nnz, &comp_bsk, &swap_comp);
-                }
-                else {
-                    #pragma omp parallel 
-                    aqsort::parallel_sort(nnz, &comp_s, &swap_comp);
-                }
+                #pragma omp parallel 
+                aqsort::parallel_sort(nnz, &comp, &swap_comp);
             }
             break;
     }
@@ -273,91 +369,46 @@ void iterate(const uintmax_t bsk, const uintmax_t s, const int num_threads, cons
     omp_set_num_threads(num_threads);
 
     timer.start();
-    if (bsk > 0) {
-        #pragma omp parallel
-        {
-            int t = omp_get_thread_num();
+    #pragma omp parallel
+    {
+        int t = omp_get_thread_num();
 
-            // find boundaries for threads
-            if (t > 0) {
-                uintmax_t l = (nnz * t) / num_threads;
-                uintmax_t I = rows[l] >> bsk;
-                uintmax_t J = cols[l] >> bsk;
-                uintmax_t I_, J_;
+        // find boundaries for threads
+        if (t > 0) {
+            uintmax_t l = (nnz * t) / num_threads;
+            uintmax_t I = rows[l] / s;
+            uintmax_t J = cols[l] / s;
+            uintmax_t I_, J_;
 
+            l++;
+            while (l < nnz) {
+                I_ = rows[l] / s; 
+                J_ = cols[l] / s;
+                if ((I_ != I) || (J_ != J))
+                    break;
                 l++;
-                while (l < nnz) {
-                    I_ = rows[l] >> bsk;
-                    J_ = cols[l] >> bsk;
-                    if ((I_ != I) || (J_ != J))
-                        break;
-                    l++;
-                };
-                tb[t] = l;
-            }
-
-            #pragma omp barrier
-
-            uintmax_t l1 = tb[t];
-            uintmax_t I = rows[l1] >> bsk;
-            uintmax_t J = cols[l1] >> bsk;
-
-            for (uintmax_t l = tb[t] + 1; l < tb[t + 1]; l++) {
-                uintmax_t I_ = rows[l] >> bsk;
-                uintmax_t J_ = cols[l] >> bsk;
-                if ((I_ != I) || (J_ != J)) {
-                    processor(l1, l - 1);
-                    l1 = l;
-                    I = I_;
-                    J = J_;
-                }
-            }
-            if (l1 <= tb[t + 1] - 1)
-                processor(l1, tb[t + 1] - 1);
+            };
+            tb[t] = l;
         }
-    }
-    else {
-        #pragma omp parallel
-        {
-            int t = omp_get_thread_num();
 
-            // find boundaries for threads
-            if (t > 0) {
-                uintmax_t l = (nnz * t) / num_threads;
-                uintmax_t I = rows[l] / s;
-                uintmax_t J = cols[l] / s;
-                uintmax_t I_, J_;
+        #pragma omp barrier
 
-                l++;
-                while (l < nnz) {
-                    I_ = rows[l] / s; 
-                    J_ = cols[l] / s;
-                    if ((I_ != I) || (J_ != J))
-                        break;
-                    l++;
-                };
-                tb[t] = l;
+        uintmax_t l1 = tb[t];
+        uintmax_t I = rows[l1] / s;
+        uintmax_t J = cols[l1] / s;
+
+        for (uintmax_t l = tb[t] + 1; l < tb[t + 1]; l++) {
+            uintmax_t I_ = rows[l] / s;
+            uintmax_t J_ = cols[l] / s;
+            if ((I_ != I) || (J_ != J)) {
+                processor(l1, l - 1);
+                l1 = l;
+                I = I_;
+                J = J_;
             }
-
-            #pragma omp barrier
-
-            uintmax_t l1 = tb[t];
-            uintmax_t I = rows[l1] / s;
-            uintmax_t J = cols[l1] / s;
-
-            for (uintmax_t l = tb[t] + 1; l < tb[t + 1]; l++) {
-                uintmax_t I_ = rows[l] / s;
-                uintmax_t J_ = cols[l] / s;
-                if ((I_ != I) || (J_ != J)) {
-                    processor(l1, l - 1);
-                    l1 = l;
-                    I = I_;
-                    J = J_;
-                }
-            }
-            if (l1 <= tb[t + 1] - 1)
-                processor(l1, tb[t + 1] - 1);
         }
+        if (l1 <= tb[t + 1] - 1)
+            processor(l1, tb[t + 1] - 1);
     }
     timer.stop();
     std::cout << "Iteration time:   " << yellow
@@ -474,11 +525,15 @@ int main(int argc, char* argv[])
     if (s == 0) {
         for (bsk = 1; bsk <= 10; bsk++) {
             std::cout << "Tested block size: " << magenta << (1 << bsk) << reset << std::endl;
-            iterate(bsk, s, num_threads, processor);
+            iterate_bsk(bsk, num_threads, processor);
         }
     }
-    else 
-        iterate(bsk, s, num_threads, processor);
+    else {
+        if (bsk > 0)
+            iterate_bsk(bsk, num_threads, processor);
+        else 
+            iterate_s(s, num_threads, processor);
+    }
     timer.stop();
 
     std::cout << "Overall time:     " << green
