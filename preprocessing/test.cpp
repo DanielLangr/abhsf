@@ -155,16 +155,27 @@ void read_mm(const std::string& filename)
 }
 
 template <typename Processor>
-void iterate(const uintmax_t bsk, const int num_threads, const Processor& processor)
+void iterate(const uintmax_t bsk, const uintmax_t s, const int num_threads, const Processor& processor)
 {
     // sort in parallel
     omp_set_num_threads(num_threads);
 
-    auto comp = [bsk](std::size_t i, std::size_t j) {
+    auto comp_bsk = [bsk](std::size_t i, std::size_t j) {
         uintmax_t Ii = rows[i] >> bsk;
         uintmax_t Ij = rows[j] >> bsk;
         uintmax_t Ji = cols[i] >> bsk;
         uintmax_t Jj = cols[j] >> bsk;
+
+        if (Ii < Ij) return true;
+        if ((Ii == Ij) && (Ji < Jj)) return true;
+        return false;
+    };
+
+    auto comp_s = [s](std::size_t i, std::size_t j) {
+        uintmax_t Ii = rows[i] / s;
+        uintmax_t Ij = rows[j] / s;
+        uintmax_t Ji = cols[i] / s;
+        uintmax_t Jj = cols[j] / s;
 
         if (Ii < Ij) return true;
         if ((Ii == Ij) && (Ji < Jj)) return true;
@@ -180,8 +191,14 @@ void iterate(const uintmax_t bsk, const int num_threads, const Processor& proces
                     std::swap(cols[i], cols[j]);
                 };
 
-                #pragma omp parallel 
-                aqsort::parallel_sort(nnz, &comp, &swap_pat);
+                if (bsk > 0) {
+                    #pragma omp parallel 
+                    aqsort::parallel_sort(nnz, &comp_bsk, &swap_pat);
+                }
+                else {
+                    #pragma omp parallel 
+                    aqsort::parallel_sort(nnz, &comp_s, &swap_pat);
+                }
             }
             break;
 
@@ -193,8 +210,14 @@ void iterate(const uintmax_t bsk, const int num_threads, const Processor& proces
                     std::swap(vals_int[i], vals_int[j]);
                 };
 
-                #pragma omp parallel 
-                aqsort::parallel_sort(nnz, &comp, &swap_int);
+                if (bsk > 0) {
+                    #pragma omp parallel 
+                    aqsort::parallel_sort(nnz, &comp_bsk, &swap_int);
+                }
+                else {
+                    #pragma omp parallel 
+                    aqsort::parallel_sort(nnz, &comp_s, &swap_int);
+                }
             }
             break;
 
@@ -206,8 +229,14 @@ void iterate(const uintmax_t bsk, const int num_threads, const Processor& proces
                     std::swap(vals_re[i], vals_re[j]);
                 };
 
-                #pragma omp parallel 
-                aqsort::parallel_sort(nnz, &comp, &swap_real);
+                if (bsk > 0) {
+                    #pragma omp parallel 
+                    aqsort::parallel_sort(nnz, &comp_bsk, &swap_real);
+                }
+                else {
+                    #pragma omp parallel 
+                    aqsort::parallel_sort(nnz, &comp_s, &swap_real);
+                }
             }
             break;
 
@@ -220,8 +249,14 @@ void iterate(const uintmax_t bsk, const int num_threads, const Processor& proces
                     std::swap(vals_im[i], vals_im[j]);
                 };
 
-                #pragma omp parallel 
-                aqsort::parallel_sort(nnz, &comp, &swap_comp);
+                if (bsk > 0) {
+                    #pragma omp parallel 
+                    aqsort::parallel_sort(nnz, &comp_bsk, &swap_comp);
+                }
+                else {
+                    #pragma omp parallel 
+                    aqsort::parallel_sort(nnz, &comp_s, &swap_comp);
+                }
             }
             break;
     }
@@ -318,14 +353,25 @@ int main(int argc, char* argv[])
     timer.stop();
     std::cout << "Matrix reading time: " << yellow << timer.seconds() << reset << " [s]" << std::endl;
 
-    uintmax_t bsk = std::atoi(argv[2]);
-    if (bsk == 0) {
-        std::cout << "Block size power: " << cyan << "1, 2, ..., 10" << reset << std::endl;
+    uintmax_t s = std::atoi(argv[2]);
+    uintmax_t bsk = 0;
+    if (s == 0) {
         std::cout << "Block size: " << cyan << "2, 4, ..., 1024" << reset << std::endl;
+        std::cout << "Block size power: " << cyan << "1, 2, ..., 10" << reset << std::endl;
     }
     else {
-        std::cout << "Block size power: " << cyan << bsk << reset << std::endl;
+        // is s a power of 2?
+        if ((s & (s - 1)) == 0) {
+            // find exponent
+            while ((s >> bsk) != 1)
+                bsk++;
+        }
+
         std::cout << "Block size: " << cyan << (1 << bsk) << reset <<std::endl;
+        if (bsk > 0) 
+            std::cout << "Block size power: " << cyan << bsk << reset << std::endl;
+        else
+            std::cout << "Block size power: " << red << "N/A" << reset << std::endl;
     }
 
     int num_threads = std::atoi(argv[3]);
@@ -380,14 +426,14 @@ int main(int argc, char* argv[])
     // iterations
     timer.start();
 
-    if (bsk == 0) {
+    if (s == 0) {
         for (bsk = 1; bsk <= 10; bsk++) {
             std::cout << "Tested block size: " << magenta << (1 << bsk) << reset << std::endl;
-            iterate(bsk, num_threads, processor);
+            iterate(bsk, s, num_threads, processor);
         }
     }
     else 
-        iterate(bsk, num_threads, processor);
+        iterate(bsk, s, num_threads, processor);
     timer.stop();
 
     std::cout << "Overall time:     " << green
