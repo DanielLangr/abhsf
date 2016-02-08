@@ -42,7 +42,7 @@ class abhsf_structure_memory_footprint_processor
 {
     public:
         abhsf_structure_memory_footprint_processor(uintmax_t b, uintmax_t s, int num_threads) 
-            : b_(b), s_(s), smf_(num_threads, 0)
+            : b_(b), s_(s), smf_(num_threads)
         {
             M_ = m / s;
             if (m % s)
