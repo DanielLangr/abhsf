@@ -608,7 +608,7 @@ int main(int argc, char* argv[])
         for (bsk = 1; bsk <= 10; bsk++) {
             std::cout << "Tested block size: " << magenta << (1 << bsk) << reset << std::endl;
             if (processor_type == 0) {
-                auto processor = [](uintmax_t, uintmax_t, int){};
+                auto processor = [](uintmax_t, uintmax_t, int){ volatile int i = 0; };
                 iterate_bsk(bsk, num_threads, processor);
             }
             else if (processor_type == 2) {
@@ -627,7 +627,7 @@ int main(int argc, char* argv[])
     else {
         if (bsk > 0) {
             if (processor_type == 0) {
-                auto processor = [](uintmax_t, uintmax_t, int){};
+                auto processor = [](uintmax_t, uintmax_t, int){ volatile int i = 0; };
                 iterate_bsk(bsk, num_threads, processor); 
             }
             else if (processor_type == 1) {
