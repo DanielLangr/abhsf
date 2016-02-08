@@ -35,6 +35,9 @@ std::vector<uint32_t> rows, cols;
 std::vector<double> vals_re, vals_im;
 std::vector<int64_t> vals_int;
 
+double total_sorting_time = 0.0;
+double total_iteration_time = 0.0;
+
 class abhsf_structure_memory_footprint_processor
 {
     public:
@@ -305,6 +308,7 @@ void iterate_bsk(const uintmax_t bsk, const int num_threads, Processor& processo
     std::cout << "Sorting time:     " << yellow
         << std::fixed << std::setprecision(4) << std::setw(8)
         << timer.seconds() << reset << " [s]" << std::endl;
+    total_sorting_time += timer.seconds();
 
     // iterate in parallel
     uintmax_t tb[num_threads + 1];
@@ -359,6 +363,7 @@ void iterate_bsk(const uintmax_t bsk, const int num_threads, Processor& processo
     std::cout << "Iteration time:   " << yellow
         << std::fixed << std::setprecision(4) << std::setw(8)
         << timer.seconds() << reset << " [s]" << std::endl;
+    total_iteration_time += timer.seconds();
 }
 
 template <typename Processor>
@@ -436,6 +441,7 @@ void iterate_s(const uintmax_t s, const int num_threads, Processor& processor)
     std::cout << "Sorting time:     " << yellow
         << std::fixed << std::setprecision(4) << std::setw(8)
         << timer.seconds() << reset << " [s]" << std::endl;
+    total_sorting_time += timer.seconds();
 
     // iterate in parallel
     uintmax_t tb[num_threads + 1];
@@ -490,6 +496,7 @@ void iterate_s(const uintmax_t s, const int num_threads, Processor& processor)
     std::cout << "Iteration time:   " << yellow
         << std::fixed << std::setprecision(4) << std::setw(8)
         << timer.seconds() << reset << " [s]" << std::endl;
+    total_iteration_time += timer.seconds();
 }
 
 void checksum()
@@ -608,8 +615,10 @@ int main(int argc, char* argv[])
                 s = 1UL << bsk;
                 abhsf_structure_memory_footprint_processor processor(b, s, num_threads);
                 iterate_bsk(bsk, num_threads, processor);
-                std::cout << "Structure memory footprint: " << cyan << processor.smf()
-                    << reset << " [bits]" << std::endl;
+                std::cout << "Structure memory footprint: "
+                    << cyan << std::right << std::setw(14) << processor.smf() << reset << " [bits] = "
+                    << cyan << std::fixed << std::setprecision(4) << std::setw(10) 
+                        << (double(processor.smf()) / (8.0 * 1024.0 * 1024.0)) << reset << " [MB]" << std::endl;
             }
             else 
                 throw std::runtime_error("Unsupported processor type");
@@ -629,8 +638,10 @@ int main(int argc, char* argv[])
                 s = 1UL << bsk;
                 abhsf_structure_memory_footprint_processor processor(b, s, num_threads);
                 iterate_bsk(bsk, num_threads, processor);
-                std::cout << "Structure memory footprint: " << cyan << processor.smf()
-                    << reset << " [bits]" << std::endl;
+                std::cout << "Structure memory footprint: "
+                    << cyan << std::right << std::setw(14) << processor.smf() << reset << " [bits] = "
+                    << cyan << std::fixed << std::setprecision(4) << std::setw(10) 
+                        << (double(processor.smf()) / (8.0 * 1024.0 * 1024.0)) << reset << " [MB]" << std::endl;
             }
             else 
                 throw std::runtime_error("Unsupported processor type");
@@ -651,9 +662,15 @@ int main(int argc, char* argv[])
     }
     timer.stop();
 
-    std::cout << "Overall time:     " << green
+    std::cout << "Overall time:         " << green
         << std::fixed << std::setprecision(4) << std::setw(8)
         << timer.seconds() << reset << " [s]" << std::endl;
+    std::cout << "Total sorting time:   " << yellow
+        << std::fixed << std::setprecision(4) << std::setw(8)
+        << total_sorting_time << reset << " [s]" << std::endl;
+    std::cout << "Total iteration time: " << yellow
+        << std::fixed << std::setprecision(4) << std::setw(8)
+        << total_iteration_time << reset << " [s]" << std::endl;
 
     if (processor_type == 1) {
         std::cout << "Nonzeros count check: ";
