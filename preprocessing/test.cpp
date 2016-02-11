@@ -42,7 +42,7 @@ class abhsf_structure_memory_footprint_processor
 {
     public:
         abhsf_structure_memory_footprint_processor(uintmax_t b, uintmax_t s, int num_threads) 
-            : b_(b), s_(s), smf_(num_threads)
+            : b_(b), s_(s), ss_(s * s), smf_(num_threads)
         {
             M_ = m / s;
             if (m % s)
@@ -51,12 +51,10 @@ class abhsf_structure_memory_footprint_processor
             if (n % s) 
                 N_++;
             k_ = log2(s);
-            uintmax_t ss_ = s * s;
-            uintmax_t log2_MN2_ = log2(M_) + log2(N_) + 2;
-            uintmax_t log2_ss_ = log2(ss_);
-            coo_fixed_ = log2_MN2_ + log2_ss_;
-            csr_fixed_ = log2_MN2_ + (s + 1) * log2_ss_;
-            bitmap_fixed_ = log2_MN2_ + ss_;
+            log2_MN2_ = log2(M_) + log2(N_) + 2;
+            coo_fixed_ = log2(ss_);
+            csr_fixed_ = (s + 1) * log2(ss_);
+            bitmap_fixed_ = ss_;
         }
 
         void operator()(uintmax_t i1, uintmax_t i2, int t)
@@ -80,7 +78,7 @@ class abhsf_structure_memory_footprint_processor
                     min = dense;
             }
 
-            smf_[t] += min;
+            smf_[t] += log2_MN2_ + min;
         }
 
         uintmax_t smf()
@@ -108,6 +106,7 @@ class abhsf_structure_memory_footprint_processor
         uintmax_t s_;
         uintmax_t k_;
         uintmax_t M_, N_;
+        uintmax_t log2_MN2_;
         uintmax_t coo_fixed_, csr_fixed_, bitmap_fixed_, ss_;
 
         std::vector<uintmax_t> smf_;
