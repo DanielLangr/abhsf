@@ -24,8 +24,8 @@ class matrix_market_reader
         ~matrix_market_reader() { close(); }
 
         void open(const std::string& filename);
-        void next_element(uintmax_t* row, uintmax_t* col,
-                double* val_re, double* val_im, intmax_t* val_int);
+        void next_element(uintmax_t* row = nullptr, uintmax_t* col = nullptr,
+                double* val_re = nullptr, double* val_im = nullptr, intmax_t* val_int = nullptr);
         void close();
 
         const matrix_properties& props() const { return props_; }
@@ -128,8 +128,8 @@ void matrix_market_reader<T>::next_element(uintmax_t* row, uintmax_t* col,
     if (val_re) *val_re = val_re_;
     if (val_im) *val_im = val_im_;
     if (val_int) *val_int = val_int_;
-    if (row) *row = uintmax_t(row_);
-    if (col) *col = uintmax_t(col_);
+    if (row) *row = uintmax_t(row_ - 1);
+    if (col) *col = uintmax_t(col_ - 1);
 }
 
 template <typename T>
