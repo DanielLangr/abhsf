@@ -1,5 +1,5 @@
-#ifndef TIMER_H
-#define TIMER_H
+#ifndef UTILS_TIMER_H
+#define UTILS_TIMER_H
 
 #include <chrono>
 #include <cstdint>

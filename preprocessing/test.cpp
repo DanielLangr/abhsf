@@ -13,24 +13,19 @@
 #include <utility>
 #include <vector>
 
-#include <matrix_market_reader.h>
-#include <timer.h>
+#include <utils/colors.h>
+#include <utils/matrix_properties.h>
+#include <utils/matrix_market_reader.h>
+#include <utils/timer.h>
 
 #include <aqsort.h>
 
 using timer_type = chrono_timer<>;
 
-const std::string red("\033[0;31m");
-const std::string green("\033[1;32m");
-const std::string yellow("\033[1;33m");
-const std::string cyan("\033[0;36m");
-const std::string magenta("\033[0;35m");
-const std::string reset("\033[0m");
-
 // data
 uint64_t m, n, nnz;
-enum Type { PATTERN, INTEGER, REAL, COMPLEX } type;
-bool h; // if Hermitian (or symmetric)
+matrix_type_t type;
+matrix_symmetry_t symmetry;
 std::vector<uint32_t> rows, cols;
 std::vector<double> vals_re, vals_im;
 std::vector<int64_t> vals_int;
@@ -72,7 +67,7 @@ class abhsf_structure_memory_footprint_processor
             if (bitmap < min)
                 min = bitmap;
 
-            if (type != PATTERN) {
+            if (type != matrix_type_t::BINARY) {
                 uintmax_t dense = (ss_ - z) * b_;
                 if (dense < min)
                     min = dense;
@@ -114,28 +109,31 @@ class abhsf_structure_memory_footprint_processor
 
 void read_mtx(const std::string& filename) 
 {
-    matrix_market_reader<> reader;
+    std::cout << red << "******** Matrix market reader log: BEGIN ********" << reset << std::endl;
+
+    matrix_market_reader<> reader(&std::cout);
     reader.open(filename);
     
-    m = reader.m;
-    n = reader.n;
-    nnz = reader.nnz;
-    type = (Type)((int)reader.type);
-    h = reader.h;
+    const auto& props = reader.props();
+    m = props.m;
+    n = props.n;
+    nnz = props.nnz;
+    type = props.type;
+    symmetry = props.symmetry;
 
     rows.resize(nnz);
     cols.resize(nnz);
 
     switch (type) {
-        case INTEGER:
+        case matrix_type_t::INTEGER:
             vals_int.resize(nnz);
             break;
 
-        case REAL:
+        case matrix_type_t::REAL:
             vals_re.resize(nnz);
             break;
 
-        case COMPLEX:
+        case matrix_type_t::COMPLEX:
             vals_re.resize(nnz);
             vals_im.resize(nnz);
             break;
@@ -156,15 +154,15 @@ void read_mtx(const std::string& filename)
         cols[k] = col;
 
         switch (type) {
-            case INTEGER:
+            case matrix_type_t::INTEGER:
                 vals_int[k] = val_int;
                 break;
 
-            case REAL:
+            case matrix_type_t::REAL:
                 vals_re[k] = val_re;
                 break;
 
-            case COMPLEX:
+            case matrix_type_t::COMPLEX:
                 vals_re[k] = val_re;
                 vals_im[k] = val_im;
                 break;
@@ -182,6 +180,8 @@ void read_mtx(const std::string& filename)
         }
     }
 
+    std::cout << red << "******** Matrix market reader log: END ********" << reset << std::endl;
+
     std::cout << "Reverse lexicographical ordering: ";
     if (reverse_lexicographical_ordering)
         std::cout << green << "YES";
@@ -190,6 +190,7 @@ void read_mtx(const std::string& filename)
     std::cout << reset << std::endl;
 }
 
+/*
 void read_mm(const std::string& filename) 
 {
     std::ifstream file(filename, std::ifstream::binary | std::ifstream::in);
@@ -200,7 +201,7 @@ void read_mm(const std::string& filename)
 
     uint64_t temp;
     file.read((char*)&temp, sizeof(uint64_t));
-    type = (Type)temp;
+    type = (type_t)temp;
     file.read((char*)&temp, sizeof(uint64_t));
     h = (bool)temp;
 
@@ -231,6 +232,7 @@ void read_mm(const std::string& filename)
             break;
     }
 }
+*/
 
 template <typename Processor>
 void iterate_bsk(const uintmax_t bsk, const int num_threads, Processor& processor)
@@ -251,7 +253,7 @@ void iterate_bsk(const uintmax_t bsk, const int num_threads, Processor& processo
 
     timer_type timer(timer_type::start_now);
     switch (type) {
-        case PATTERN:
+        case matrix_type_t::BINARY:
             {
                 auto swap_pat = [](std::size_t i, std::size_t j) {
                     std::swap(rows[i], rows[j]);
@@ -263,7 +265,7 @@ void iterate_bsk(const uintmax_t bsk, const int num_threads, Processor& processo
             }
             break;
 
-        case INTEGER:
+        case matrix_type_t::INTEGER:
             {
                 auto swap_int = [](std::size_t i, std::size_t j) {
                     std::swap(rows[i], rows[j]);
@@ -276,7 +278,7 @@ void iterate_bsk(const uintmax_t bsk, const int num_threads, Processor& processo
             }
             break;
 
-        case REAL:
+        case matrix_type_t::REAL:
             {
                 auto swap_real = [](std::size_t i, std::size_t j) {
                     std::swap(rows[i], rows[j]);
@@ -289,7 +291,7 @@ void iterate_bsk(const uintmax_t bsk, const int num_threads, Processor& processo
             }
             break;
 
-        case COMPLEX:
+        case matrix_type_t::COMPLEX:
             {
                 auto swap_comp = [](std::size_t i, std::size_t j) {
                     std::swap(rows[i], rows[j]);
@@ -384,7 +386,7 @@ void iterate_s(const uintmax_t s, const int num_threads, Processor& processor)
 
     timer_type timer(timer_type::start_now);
     switch (type) {
-        case PATTERN:
+        case matrix_type_t::BINARY:
             {
                 auto swap_pat = [](std::size_t i, std::size_t j) {
                     std::swap(rows[i], rows[j]);
@@ -396,7 +398,7 @@ void iterate_s(const uintmax_t s, const int num_threads, Processor& processor)
             }
             break;
 
-        case INTEGER:
+        case matrix_type_t::INTEGER:
             {
                 auto swap_int = [](std::size_t i, std::size_t j) {
                     std::swap(rows[i], rows[j]);
@@ -409,7 +411,7 @@ void iterate_s(const uintmax_t s, const int num_threads, Processor& processor)
             }
             break;
 
-        case REAL:
+        case matrix_type_t::REAL:
             {
                 auto swap_real = [](std::size_t i, std::size_t j) {
                     std::swap(rows[i], rows[j]);
@@ -422,7 +424,7 @@ void iterate_s(const uintmax_t s, const int num_threads, Processor& processor)
             }
             break;
 
-        case COMPLEX:
+        case matrix_type_t::COMPLEX:
             {
                 auto swap_comp = [](std::size_t i, std::size_t j) {
                     std::swap(rows[i], rows[j]);
@@ -498,6 +500,7 @@ void iterate_s(const uintmax_t s, const int num_threads, Processor& processor)
     total_iteration_time += timer.seconds();
 }
 
+/*
 void checksum()
 {
     uint64_t c = 0;
@@ -514,6 +517,7 @@ void checksum()
 
     std::cout << "Checksum: " << std::hex << red << c << reset << std::dec << std::endl;
 }
+*/
 
 int main(int argc, char* argv[])
 {
@@ -524,8 +528,8 @@ int main(int argc, char* argv[])
 
     if (filename.substr(filename.size() - 4, 4) == ".mtx")
         read_mtx(filename);
-    else if (filename.substr(filename.size() - 3, 3) == ".mm")
-        read_mm(filename);
+ // else if (filename.substr(filename.size() - 3, 3) == ".mm")
+ //     read_mm(filename);
     else
         throw std::runtime_error("Unknown file format");
     timer.stop();
@@ -569,24 +573,24 @@ int main(int argc, char* argv[])
     uintmax_t b;
     std::cout << "Matrix type: " << cyan << (m == n ? "SQUARE, " : "RECTANBULAR, ");
     switch (type) {
-        case PATTERN:
+        case matrix_type_t::BINARY:
             b = 0;
-            std::cout << "PATTERN, " << (h ? "SYMMETRIC" : "UNSYMMETRIC");
+         // std::cout << "PATTERN, " << (h ? "SYMMETRIC" : "UNSYMMETRIC");
             break;
 
-        case INTEGER:
+        case matrix_type_t::INTEGER:
             b = 64;
-            std::cout << "INTEGER, " << (h ? "SYMMETRIC" : "UNSYMMETRIC");
+         // std::cout << "INTEGER, " << (h ? "SYMMETRIC" : "UNSYMMETRIC");
             break;
 
-        case REAL:
+        case matrix_type_t::REAL:
             b = 64;
-            std::cout << "REAL, " << (h ? "SYMMETRIC" : "UNSYMMETRIC");
+         // std::cout << "REAL, " << (h ? "SYMMETRIC" : "UNSYMMETRIC");
             break;
 
-        case COMPLEX:
+        case matrix_type_t::COMPLEX:
             b = 128;
-            std::cout << "COMPLEX, " << (h ? "HERMITIAN" : "UNSYMMETRIC");
+         // std::cout << "COMPLEX, " << (h ? "HERMITIAN" : "UNSYMMETRIC");
             break;
     }
     std::cout << reset << std::endl;
@@ -595,7 +599,7 @@ int main(int argc, char* argv[])
     std::cout << "Number of columns:          " << cyan << std::right << std::setw(20) <<   n << reset << std::endl;
     std::cout << "Number of nonzero elements: " << cyan << std::right << std::setw(20) << nnz << reset << std::endl;
 
-    checksum();
+ // checksum();
 
     // nonzero-count processor data
     static std::atomic<uintmax_t> nnz_count {0};
