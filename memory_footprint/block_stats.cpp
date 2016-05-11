@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cassert>
+#include <cerrno>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -8,6 +9,8 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
+
+#include <sys/stat.h>
 
 #include <utils/colors.h>
 #include <utils/matrix_properties.h>
@@ -97,7 +100,13 @@ int main(int argc, char* argv[])
     std::cout << std::endl;
 
     const auto matname = matrix_name(argv[1]);
-    std::ofstream f(matname + ".props");
+
+    // directory
+    if ((mkdir(matname.c_str(), 0755) != 0) && (errno != EEXIST))
+        throw std::runtime_error("Error creating directory!");
+
+    // props file
+    std::ofstream f(matname + "/props");
     f << props.m << " " << props.n << " " << props.nnz << " "
         << static_cast<int>(props.type) << " " << static_cast<int>(props.symmetry) << std::endl;
     f.close();
@@ -111,8 +120,9 @@ int main(int argc, char* argv[])
         map.clear();
         process_block_size(elements, k, map);
 
+        // statistics file
         std::stringstream filename;
-        filename << matname << "-" << s << ".bstats";
+        filename << matname << "/" << s << ".bstats";
         std::ofstream f(filename.str());
 
         uintmax_t nnz = 0; // check
