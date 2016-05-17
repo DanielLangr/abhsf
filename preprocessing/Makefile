@@ -1,4 +1,5 @@
-PROGRAMS += test-clang test-gnu test-intel
+#PROGRAMS += test-clang test-gnu test-intel
+PROGRAMS += test-gnu
 
 RM = rm -f
 
@@ -6,7 +7,7 @@ CXXFLAGS = -std=c++11 -O3 -DNDEBUG
 #CXXFLAGS = -std=c++11 -O0 -g
 #CXXFLAGS = -std=c++11 -O3 -g
 
-CXXFLAGS += -I../utils/include
+CXXFLAGS += -I../include
 CXXFLAGS += -I$(AQSORT_ROOT)/include
 
 .PHONY: all

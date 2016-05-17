@@ -1,16 +1,17 @@
 #include <algorithm>
 #include <cstdint>
 #include <cassert>
-#include <cerrno>
+//#include <cerrno>
 #include <fstream>
 #include <iostream>
 #include <map>
-#include <sstream>
+//#include <sstream>
+#include <string>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
-#include <sys/stat.h>
+//#include <sys/stat.h>
 
 #include <utils/colors.h>
 #include <utils/matrix_properties.h>
@@ -73,7 +74,7 @@ void process_block_size(elements_t& elements, const int k, map_t& map)
     }
     map[block_nnz]++;
 }
-
+/*
 std::string matrix_name(const std::string& path)
 {
     assert (path.size() > 0);
@@ -86,7 +87,7 @@ std::string matrix_name(const std::string& path)
     pos = filename.find_last_of('.');
     return filename.substr(0, pos);
 }
-
+*/
 int main(int argc, char* argv[])
 {
 
@@ -98,15 +99,16 @@ int main(int argc, char* argv[])
     timer.stop();
     std::cout << "Matrix reading time: " << yellow << timer.seconds() << reset << " [s]" << std::endl;
     std::cout << std::endl;
-
+/*
     const auto matname = matrix_name(argv[1]);
 
     // directory
     if ((mkdir(matname.c_str(), 0755) != 0) && (errno != EEXIST))
         throw std::runtime_error("Error creating directory!");
-
+*/
     // props file
-    std::ofstream f(matname + "/props");
+ // std::ofstream f(matname + "/props");
+    std::ofstream f("props");
     f << props.m << " " << props.n << " " << props.nnz << " "
         << static_cast<int>(props.type) << " " << static_cast<int>(props.symmetry) << std::endl;
     f.close();
@@ -121,9 +123,11 @@ int main(int argc, char* argv[])
         process_block_size(elements, k, map);
 
         // statistics file
-        std::stringstream filename;
-        filename << matname << "/" << s << ".bstats";
-        std::ofstream f(filename.str());
+     // std::stringstream filename;
+     // filename << matname << "/" << s << ".bstats";
+     // filename << s << ".bstats";
+     // std::ofstream f(filename.str());
+        std::ofstream f(std::to_string(s) + ".bstats");
 
         uintmax_t nnz = 0; // check
         for (auto iter = map.cbegin(); iter != map.cend(); ++iter) {
