@@ -20,10 +20,12 @@
 using element_t = std::pair<uint32_t, uint32_t>;
 using elements_t = std::vector<element_t>;
 
+/*
 std::vector<std::pair<uintmax_t, uintmax_t>> tested_bs_powers = {
     {1, 1}, {1, 2}, {2, 1}, {2, 2}, {2, 3}, {3, 2}, {3, 3},
     {3, 4}, {4, 3}, {4, 4}, {4, 5}, {5, 4}, {5, 5}, {6, 6}, {7, 7}
 };
+*/
 
 void read_mtx(const std::string& filename, elements_t& elements, matrix_properties& props) 
 {
@@ -104,31 +106,34 @@ int main(int argc, char* argv[])
     f.close();
 
     map_t map; // how many blocks for particular block nonzero elements count ("histogram")
-    for (const auto bs_powers : tested_bs_powers) {
-        const int k = bs_powers.first;
-        const int l = bs_powers.second;
-        const uintmax_t r = 1UL << k;
-        const uintmax_t s = 1UL << l;
+ // for (const auto bs_powers : tested_bs_powers) {
+ //     const int k = bs_powers.first;
+ //     const int l = bs_powers.second;
+    for (int k = 1; k <= 8; k++) {
+        for (int l = 1; l <= 8; l++) {
+            const uintmax_t r = 1UL << k;
+            const uintmax_t s = 1UL << l;
 
-        std::cout << "Testing block size: "
-            << green << std::right << std::setw(6) << r << " x " << s << reset << std::endl;
+            std::cout << "Testing block size: "
+                << green << std::right << std::setw(6) << r << " x " << s << reset << std::endl;
 
-        map.clear();
-        process_block_size_powers(elements, k, l, map);
+            map.clear();
+            process_block_size_powers(elements, k, l, map);
 
-        // statistics file
-        std::ofstream f(std::to_string(r) + "x" + std::to_string(s) + ".bstats");
+            // statistics file
+            std::ofstream f(std::to_string(r) + "x" + std::to_string(s) + ".bstats");
 
-        uintmax_t nnz = 0; // check
-        for (auto iter = map.cbegin(); iter != map.cend(); ++iter) {
-            f << iter->first << " " << iter->second << std::endl;
-            nnz += iter->first * iter->second;
+            uintmax_t nnz = 0; // check
+            for (auto iter = map.cbegin(); iter != map.cend(); ++iter) {
+                f << iter->first << " " << iter->second << std::endl;
+                nnz += iter->first * iter->second;
+            }
+            
+            f.close();
+
+         // assert(nnz == props.nnz);
+            if (nnz != props.nnz)
+                throw std::runtime_error("Nonzero elements counts do not match!");
         }
-        
-        f.close();
-
-     // assert(nnz == props.nnz);
-        if (nnz != props.nnz)
-            throw std::runtime_error("Nonzero elements counts do not match!");
     }
 }
