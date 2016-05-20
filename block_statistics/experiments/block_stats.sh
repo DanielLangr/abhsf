@@ -10,8 +10,6 @@ cd results
 
 while read line
 do
- # cat=$(echo $line | cut -f1 -d\ )
- # mat=$(echo $line | cut -f2 -d\ )
    cat=$(echo -n $line | awk '{print $1}' | tr -d [:space:])
    mat=$(echo -n $line | awk '{print $2}' | tr -d [:space:])
 
@@ -30,10 +28,6 @@ do
    $ABHSF_ROOT/block_statistics/block_stats ${mat}.mtx
    rm ${mat}.mtx
    cd ..
-
-#  cd $mat
-#  $ABHSF_ROOT/block_statistics/msmf
-#  cd ..
 done < ../$1
 
 cd ..

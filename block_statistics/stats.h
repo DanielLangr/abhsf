@@ -5,6 +5,7 @@
 #include <fstream>
 #include <map>
 #include <string>
+#include <utility>
 
 #include <abhsf/utils/matrix_properties.h>
 
@@ -12,7 +13,7 @@ class matrix_block_stats
 {
     public:
         using block_stats_t = std::map<uint32_t, uint32_t>; // block nnz -> number of blocks
-        using stats_t = std::map<uint32_t, block_stats_t>; // block size -> block statistics
+        using stats_t = std::map<std::pair<uint32_t, uint32_t>, block_stats_t>; // block size -> block statistics
 
         void read()
         {
@@ -27,19 +28,24 @@ class matrix_block_stats
             f.close();
 
             // read block statistics
-            for (int k = 1; k <= 10; k++) {
-                const uint32_t s = 1 << k; // block size
-                stats_.emplace(s, block_stats_t());
+            for (int k = 1; k <= 8; k++) {
+                for (int l = 1; l <= 8; l++) {
+                    const uint32_t r = 1 << k; // block height
+                    const uint32_t s = 1 << l; // block width
+                    auto block_size = std::make_pair(r, s);
 
-                std::ifstream f(std::to_string(s) + ".bstats");
-                while (true) {
-                    uint32_t nnz, count;
-                    f >> nnz >> count;
-                    if (!f) 
-                        break;
-                    stats_[s].emplace(nnz, count);
+                    stats_.emplace(block_size, block_stats_t());
+
+                    std::ifstream f(std::to_string(r) + "x" + std::to_string(s) + ".bstats");
+                    while (true) {
+                        uint32_t nnz, count;
+                        f >> nnz >> count;
+                        if (!f) 
+                            break;
+                        stats_[block_size].emplace(nnz, count);
+                    }
+                    f.close();
                 }
-                f.close();
             }
         }
 
