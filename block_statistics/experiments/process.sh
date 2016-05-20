@@ -21,6 +21,7 @@ do
    tar -xzf ${mat}.tar.gz
    rm -f ${mat}.tar.gz
    mv $mat ${mat}-temp
+   rm -rf $mat
    mkdir $mat
    mv ${mat}-temp/${mat}.mtx $mat/
    rm -rf ${mat}-temp
@@ -30,9 +31,9 @@ do
    rm ${mat}.mtx
    cd ..
 
-   cd $mat
-   $ABHSF_ROOT/block_statistics/msmf
-   cd ..
-done < $1
+#  cd $mat
+#  $ABHSF_ROOT/block_statistics/msmf
+#  cd ..
+done < ../$1
 
 cd ..

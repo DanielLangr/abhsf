@@ -13,15 +13,17 @@
 
 //#include <sys/stat.h>
 
-#include <utils/colors.h>
-#include <utils/matrix_properties.h>
-#include <utils/matrix_market_reader.h>
-#include <utils/timer.h>
+#include <abhsf/utils/colors.h>
+#include <abhsf/utils/matrix_properties.h>
+#include <abhsf/utils/matrix_market_reader.h>
 
 using element_t = std::pair<uint32_t, uint32_t>;
 using elements_t = std::vector<element_t>;
 
-using timer_type = chrono_timer<>;
+std::vector<std::pair<uintmax_t, uintmax_t>> tested_bs_powers = {
+    {1, 1}, {1, 2}, {2, 1}, {2, 2}, {2, 3}, {3, 2}, {3, 3},
+    {3, 4}, {4, 3}, {4, 4}, {4, 5}, {5, 4}, {5, 5}, {6, 6}, {7, 7}
+};
 
 void read_mtx(const std::string& filename, elements_t& elements, matrix_properties& props) 
 {
@@ -42,29 +44,29 @@ void read_mtx(const std::string& filename, elements_t& elements, matrix_properti
     std::cout << red << "... [DONE]" << reset << std::endl;
 }
 
-inline uint64_t block_index(const element_t& element, const int k)
+inline uint64_t block_index_powers(const element_t& element, const int k, const int l)
 {
     uint64_t block_row = (uint64_t)element.first >> k;
-    uint64_t block_col = (uint64_t)element.second >> k;
+    uint64_t block_col = (uint64_t)element.second >> l;
     return (block_row << 32) + block_col;
 }
 
 using map_t = std::map<uint64_t, uint64_t>;
 
-void process_block_size(elements_t& elements, const int k, map_t& map)
+void process_block_size_powers(elements_t& elements, const int k, const int l, map_t& map)
 {
     assert(elements.size() > 0);
 
-    auto comp = [k](const element_t& lhs, const element_t& rhs) {
-        return block_index(lhs, k) < block_index(rhs, k);
+    auto comp = [k, l](const element_t& lhs, const element_t& rhs) {
+        return block_index_powers(lhs, k, l) < block_index_powers(rhs, k, l);
     };
 
     std::sort(elements.begin(), elements.end(), comp);
 
-    auto bi_1 = block_index(elements.front(), k);
+    auto bi_1 = block_index_powers(elements.front(), k, l);
     uintmax_t block_nnz = 1;
     for (auto iter = elements.cbegin() + 1; iter != elements.cend(); ++iter) {
-        auto bi_2 = block_index(*iter, k);
+        auto bi_2 = block_index_powers(*iter, k, l);
         if (bi_2 != bi_1) {
             map[block_nnz]++;
             block_nnz = 0;
@@ -93,41 +95,29 @@ int main(int argc, char* argv[])
 
     elements_t elements;
     matrix_properties props;
-
-    timer_type timer(timer_type::start_now);
     read_mtx(argv[1], elements, props);
-    timer.stop();
-    std::cout << "Matrix reading time: " << yellow << timer.seconds() << reset << " [s]" << std::endl;
-    std::cout << std::endl;
-/*
-    const auto matname = matrix_name(argv[1]);
 
-    // directory
-    if ((mkdir(matname.c_str(), 0755) != 0) && (errno != EEXIST))
-        throw std::runtime_error("Error creating directory!");
-*/
     // props file
- // std::ofstream f(matname + "/props");
     std::ofstream f("props");
     f << props.m << " " << props.n << " " << props.nnz << " "
         << static_cast<int>(props.type) << " " << static_cast<int>(props.symmetry) << std::endl;
     f.close();
 
     map_t map; // how many blocks for particular block nonzero elements count ("histogram")
-    for (int k = 1; k <= 10; k++) {
-        const uintmax_t s = 1UL << k;
+    for (const auto bs_powers : tested_bs_powers) {
+        const int k = bs_powers.first;
+        const int l = bs_powers.second;
+        const uintmax_t r = 1UL << k;
+        const uintmax_t s = 1UL << l;
+
         std::cout << "Testing block size: "
-            << green << std::right << std::setw(6) << s << reset << std::endl;
+            << green << std::right << std::setw(6) << r << " x " << s << reset << std::endl;
 
         map.clear();
-        process_block_size(elements, k, map);
+        process_block_size_powers(elements, k, l, map);
 
         // statistics file
-     // std::stringstream filename;
-     // filename << matname << "/" << s << ".bstats";
-     // filename << s << ".bstats";
-     // std::ofstream f(filename.str());
-        std::ofstream f(std::to_string(s) + ".bstats");
+        std::ofstream f(std::to_string(r) + "x" + std::to_string(s) + ".bstats");
 
         uintmax_t nnz = 0; // check
         for (auto iter = map.cbegin(); iter != map.cend(); ++iter) {
