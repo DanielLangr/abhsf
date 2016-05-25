@@ -1,4 +1,4 @@
-PROGRAMS += block_stats msmf test
+PROGRAMS += block_stats msmf 
 
 CXX = g++
 
@@ -9,6 +9,8 @@ RM = rm -f
 CXXFLAGS = -std=c++11 -O0 -g
 
 CXXFLAGS += -I../include
+
+CXXFLAGS += -fopenmp -D_GLIBCXX_PARALLEL
 
 .PHONY: all
 all: $(PROGRAMS)

@@ -94,7 +94,6 @@ std::string matrix_name(const std::string& path)
 */
 int main(int argc, char* argv[])
 {
-
     elements_t elements;
     matrix_properties props;
     read_mtx(argv[1], elements, props);
