@@ -16,12 +16,15 @@ do
    rm -rf msmf-min
    rm -rf msmf-min-single
    rm -rf msmf-min-double
+   rm -rf msmf-min-square-single
+   rm -rf msmf-min-square-double
 
    for i in 3 4 5 6 7 8 10
    do
       j=$(($i-3))
       f=${formats[$j]}
       cat msmf | awk -v f=$f -v i=$i '{printf("%10s %6d %6d %20d\n", f, $1, $2, $i)}' | sort -k 4 -n | head -n 1 | tee -a msmf-min-single
+      cat msmf | awk '$1 == $2' | awk -v f=$f -v i=$i '{printf("%10s %6d %6d %20d\n", f, $1, $2, $i)}' | sort -k 4 -n | head -n 1 | tee -a msmf-min-square-single
    done
 
    for i in 3 4 5 6 7 9 11
@@ -29,6 +32,7 @@ do
       j=$(($i-3))
       f=${formats[$j]}
       cat msmf | awk -v f=$f -v i=$i '{printf("%10s %6d %6d %20d\n", f, $1, $2, $i)}' | sort -k 4 -n | head -n 1 | tee -a msmf-min-double
+      cat msmf | awk '$1 == $2' | awk -v f=$f -v i=$i '{printf("%10s %6d %6d %20d\n", f, $1, $2, $i)}' | sort -k 4 -n | head -n 1 | tee -a msmf-min-square-double
    done
 
    cd ..
