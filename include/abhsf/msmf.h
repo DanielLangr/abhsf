@@ -47,4 +47,19 @@ inline uintmax_t block_min_msmf(uintmax_t m, uintmax_t n, uintmax_t nnz, uintmax
     }
 }
 
+inline uintmax_t block_min_msmf_wocsr(
+        uintmax_t m, uintmax_t n, uintmax_t nnz, uintmax_t bits_per_element, bool is_binary)
+{
+    auto coo = block_coo_msmf(m, n, nnz);
+    auto bitmap = block_bitmap_msmf(m, n);
+
+    if (is_binary) { // do not consider dense scheme for binary matirces
+        return std::min(coo, bitmap);
+    }
+    else {
+        auto dense = block_dense_msmf(m, n, nnz, bits_per_element);
+        return std::min(coo, std::min(bitmap, dense));
+    }
+}
+
 #endif

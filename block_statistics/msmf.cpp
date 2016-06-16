@@ -47,6 +47,8 @@ int main()
     }
 
     std::ofstream f("msmf");
+    std::ofstream f_mmf_single("mmf-single");
+    std::ofstream f_mmf_double("mmf-double");
 
     uintmax_t msmf_coo32 = props.nnz * 32 * 2;
     uintmax_t msmf_csr32 = (props.m + 1 + props.nnz) * 32;
@@ -70,6 +72,7 @@ int main()
         uintmax_t msmf_bitmap = msmf_csr0;
         uintmax_t msmf_dense_single = msmf_csr0, msmf_dense_double = msmf_csr0;
         uintmax_t msmf_abhsf_single = msmf_csr0, msmf_abhsf_double = msmf_csr0;
+        uintmax_t msmf_abhsf_134_single = msmf_csr0, msmf_abhsf_134_double = msmf_csr0;
 
         if (is_binary) {
             msmf_dense_single = std::numeric_limits<uintmax_t>::max();
@@ -91,6 +94,11 @@ int main()
                 += (block_min_msmf(r, s, block_nnz, bits_per_single_element, is_binary) + 2) * n_blocks;
             msmf_abhsf_double
                 += (block_min_msmf(r, s, block_nnz, bits_per_single_element * 2, is_binary) + 2) * n_blocks;
+
+            msmf_abhsf_134_single
+                += (block_min_msmf_wocsr(r, s, block_nnz, bits_per_single_element, is_binary) + 2) * n_blocks;
+            msmf_abhsf_134_double
+                += (block_min_msmf_wocsr(r, s, block_nnz, bits_per_single_element * 2, is_binary) + 2) * n_blocks;
         }
 
         print_single("CSR-COO", msmf_coo);
@@ -107,7 +115,30 @@ int main()
             << msmf_dense_single << " " << msmf_dense_double << " "
             << msmf_abhsf_single << " " << msmf_abhsf_double
             << std::endl;
+
+        uintmax_t valf_single = props.nnz * bits_per_single_element;
+        uintmax_t valf_double = valf_single * 2;
+
+        f_mmf_single << r << " " << s << " " 
+            << (msmf_coo32 + valf_single) << " " <<  (msmf_csr32 + valf_single) << " "
+            << (msmf_coo + valf_single) << " " << (msmf_csr + valf_single) << " "
+            << (msmf_bitmap + valf_single) << " " 
+            << (msmf_dense_single + valf_single) << " "
+            << (msmf_abhsf_single + valf_single) << " "
+            << (msmf_abhsf_134_single + valf_single)
+            << std::endl;
+
+        f_mmf_double << r << " " << s << " " 
+            << (msmf_coo32 + valf_double) << " " << (msmf_csr32 + valf_double) << " "
+            << (msmf_coo + valf_double) << " " << (msmf_csr + valf_double) << " "
+            << (msmf_bitmap + valf_double) << " " 
+            << (msmf_dense_double + valf_double) << " "
+            << (msmf_abhsf_double + valf_double) << " "
+            << (msmf_abhsf_134_double + valf_double)
+            << std::endl;
     }
 
     f.close();
+    f_mmf_single.close();
+    f_mmf_double.close();
 }
