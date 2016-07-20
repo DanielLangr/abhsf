@@ -1,10 +1,12 @@
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <random>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -101,8 +103,35 @@ int main(int argc, char* argv[])
     std::mt19937 g(rd());
     std::shuffle(stats.begin(), stats.end(), g);
 
+    std::set<std::pair<uintmax_t, uintmax_t>> B_64, B_20, B_14, B_8;
+
+    for (int h = 2; h <= 256; h *= 2) 
+        B_8.emplace(h, h);
+    assert(B_8.size() == 8);
+
+    B_14 = B_8;
+    for (int h = 4; h <= 16; h *= 2) 
+        for (int w = 4; w <= 16; w *= 2) 
+            B_14.emplace(h, w);
+    assert(B_14.size() == 14);
+
+    B_20 = B_8;
+    for (int h = 4; h <= 32; h *= 2) 
+        for (int w = 4; w <= 32; w *= 2) 
+            B_20.emplace(h, w);
+    assert(B_20.size() == 20);
+
+    for (int h = 2; h <= 256; h *= 2) 
+        for (int w = 2; w <= 256; w *= 2) 
+            B_64.emplace(h, w);
+    assert(B_64.size() == 64);
+
     double avg_64 = 0.0;
     double max_64 = 0.0;
+    double avg_20 = 0.0;
+    double max_20 = 0.0;
+    double avg_14 = 0.0;
+    double max_14 = 0.0;
     double avg_8 = 0.0;
     double max_8 = 0.0;
 
@@ -111,23 +140,32 @@ int main(int argc, char* argv[])
 
         // B_64:
         uintmax_t tmin = 0;
-        for (int h = 2; h <= 256; h *= 2) {
-            for (int w = 2; w <= 256; w *= 2) {
-                auto key = std::make_pair(h, w);
-                tmin = (tmin == 0) ?  tmin = stats[k].map[key] : tmin = std::min(tmin, stats[k].map[key]);
-            }
-        }
+        for (auto key : B_64) 
+            tmin = (tmin == 0) ?  tmin = stats[k].map[key] : tmin = std::min(tmin, stats[k].map[key]);
         double delta = double(tmin - min) / double(min) * 100.0;
         max_64 = std::max(max_64, delta);
         avg_64 += delta;
 
+        // B_20:
+        tmin = 0;
+        for (auto key : B_20) 
+            tmin = (tmin == 0) ?  tmin = stats[k].map[key] : tmin = std::min(tmin, stats[k].map[key]);
+        delta = double(tmin - min) / double(min) * 100.0;
+        max_20 = std::max(max_20, delta);
+        avg_20 += delta;
+
+        // B_14:
+        tmin = 0;
+        for (auto key : B_14) 
+            tmin = (tmin == 0) ?  tmin = stats[k].map[key] : tmin = std::min(tmin, stats[k].map[key]);
+        delta = double(tmin - min) / double(min) * 100.0;
+        max_14 = std::max(max_14, delta);
+        avg_14 += delta;
+
         // B_8:
         tmin = 0;
-        for (int h = 2; h <= 256; h *= 2) {
-            int w = h;
-            auto key = std::make_pair(h, w);
+        for (auto key : B_8) 
             tmin = (tmin == 0) ?  tmin = stats[k].map[key] : tmin = std::min(tmin, stats[k].map[key]);
-        }
         delta = double(tmin - min) / double(min) * 100.0;
         max_8 = std::max(max_8, delta);
         avg_8 += delta;
@@ -136,6 +174,14 @@ int main(int argc, char* argv[])
     avg_64 /= double(n);
     std::cout << "B_64: Average = " << green << avg_64 << reset
         << ", Maximum = " << red << max_64 << reset << std::endl;
+
+    avg_20 /= double(n);
+    std::cout << "B_20: Average = " << green << avg_20 << reset
+        << ", Maximum = " << red << max_20 << reset << std::endl;
+
+    avg_14 /= double(n);
+    std::cout << "B_14: Average = " << green << avg_14 << reset
+        << ", Maximum = " << red << max_14 << reset << std::endl;
 
     avg_8 /= double(n);
     std::cout << "B_8: Average = " << green << avg_8 << reset
