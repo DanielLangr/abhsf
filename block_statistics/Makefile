@@ -1,4 +1,4 @@
-PROGRAMS += block_stats msmf 
+PROGRAMS += block_stats consistency msmf 
 
 CXX = g++
 
