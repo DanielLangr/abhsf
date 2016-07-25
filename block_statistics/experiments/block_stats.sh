@@ -28,6 +28,8 @@ do
    $ABHSF_ROOT/block_statistics/block_stats ${mat}.mtx
    rm ${mat}.mtx
    cd ..
+
+   echo ""
 done < ../$1
 
 cd ..
