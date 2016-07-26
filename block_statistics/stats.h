@@ -22,7 +22,9 @@ class matrix_block_stats
             // read matrix properties
             std::ifstream f("props");
             int type, symmetry;
-            f >> props_.m >> props_.n >> props_.nnz >> type >> symmetry;
+            uintmax_t nnz_mtx, nnz_stored, nnz_all;
+            f >> props_.m >> props_.n >> nnz_mtx >> nnz_stored >> nnz_all >> type >> symmetry;
+            props_.nnz = nnz_stored; // ! stored nnz taken
             props_.type = static_cast<matrix_type_t>(type);
             props_.symmetry = static_cast<matrix_symmetry_t>(symmetry);
             f.close();

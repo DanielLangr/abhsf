@@ -46,7 +46,7 @@ int main()
             bits_per_single_element = 0;
     }
 
-    std::ofstream f("msmf");
+ // std::ofstream f("msmf");
     std::ofstream f_mmf_single("mmf-single");
     std::ofstream f_mmf_double("mmf-double");
 
@@ -108,14 +108,14 @@ int main()
         if (!is_binary) print_single("CSR-dense(64)", msmf_dense_double);
         print_single("CSR-ABHSF(32)", msmf_abhsf_single);
         print_single("CSR-ABHSF(64)", msmf_abhsf_double);
-
+/*
         f << r << " " << s << " "
             << msmf_coo32 << " " << msmf_csr32 << " " 
             << msmf_coo << " " << msmf_csr << " " << msmf_bitmap << " "
             << msmf_dense_single << " " << msmf_dense_double << " "
             << msmf_abhsf_single << " " << msmf_abhsf_double
             << std::endl;
-
+*/
         uintmax_t valf_single = props.nnz * bits_per_single_element;
         uintmax_t valf_double = valf_single * 2;
 
@@ -138,7 +138,7 @@ int main()
             << std::endl;
     }
 
-    f.close();
+ // f.close();
     f_mmf_single.close();
     f_mmf_double.close();
 }
