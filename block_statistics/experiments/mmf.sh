@@ -12,7 +12,7 @@ do
    echo -e "${cyan}matrix: ${mat}${reset}"
 
    cd $mat
-   $ABHSF_ROOT/block_statistics/msmf | tee msmf.log
+   $ABHSF_ROOT/block_statistics/mmf
    cd ..
 done
 
