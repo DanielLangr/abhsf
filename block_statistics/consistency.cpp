@@ -83,9 +83,11 @@ int main(int argc, char* argv[])
 
                 auto key = std::make_pair(h, w);
                 if (scheme == 0)
-                    map[key] = minfixed;
+                 // map[key] = minfixed;
+                    map[key] = std::min(coo, std::min(bitmap, dense)) + 2; // w/o CSR
                 else 
-                    map[key] = adaptive;
+                 // map[key] = adaptive;
+                    map[key] = adaptive134; // w/o CSR
             }
 
             stat_t stat;

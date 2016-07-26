@@ -1,4 +1,4 @@
-PROGRAMS += block_stats consistency mmf 
+PROGRAMS += block_stats consistency min-schemes min-bss mmf 
 
 CXX = g++
 
