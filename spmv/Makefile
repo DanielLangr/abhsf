@@ -1,14 +1,17 @@
-PROGRAMS += 88 spmv
+PROGRAMS += 88 morton spmv
 
 #CXX = icpc
 CXX = g++
 
 RM = rm -f
 
-CXXFLAGS = -std=c++11 -O3 -DNDEBUG
-#CXXFLAGS = -std=c++11 -O3
+#CXXFLAGS = -std=c++11 -O3 -DNDEBUG 
+CXXFLAGS = -std=c++11 -O3
 #CXXFLAGS = -std=c++11 -Og -g
 #CXXFLAGS = -std=c++11 -O0 -g
+#CXXFLAGS += -fopt-info-vec
+#CXXFLAGS += -fopt-info-loop
+CXXFLAGS += -march=haswell
 
 CXXFLAGS += -I../include
 
