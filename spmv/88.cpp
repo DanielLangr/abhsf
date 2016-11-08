@@ -16,15 +16,15 @@
 
 #include <immintrin.h>
 
-#include <mkl.h>
+//#include <mkl.h>
 
 #include <abhsf/utils/colors.h>
 #include <abhsf/utils/timer.h>
 
 using timer_type = chrono_timer<>;
 
-//using real = float;
-using real_type = double;
+using real_type = float;
+//using real_type = double;
 
 // block size fixed 8x8 for now
 static const uint64_t block_size = 8;
@@ -36,8 +36,8 @@ static_assert(block_size == (1UL << block_size_exp), "Block size does not match 
 // (num_blocks * num_blocks) elements must not fit into cache
 static const uint64_t num_blocks = 4096;
 
-static const int num_experiments = 3;
-static const int num_iterations = 20;
+static const int num_experiments = 20;
+static const int num_iterations = 40;
 static const int warm_up_iterations = 5;
 
 class block_generator

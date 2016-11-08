@@ -1,7 +1,8 @@
-PROGRAMS += 88 morton spmv
+#PROGRAMS += 88 88_bitmap morton spmv
+PROGRAMS += 88_bitmap
 
 #CXX = icpc
-CXX = g++
+#CXX = g++
 
 RM = rm -f
 
@@ -11,20 +12,21 @@ CXXFLAGS = -std=c++11 -O3
 #CXXFLAGS = -std=c++11 -O0 -g
 #CXXFLAGS += -fopt-info-vec
 #CXXFLAGS += -fopt-info-loop
-CXXFLAGS += -march=haswell
+#CXXFLAGS += -march=haswell
 
 CXXFLAGS += -I../include
 
 #CXXFLAGS += -fopenmp -D_GLIBCXX_PARALLEL
 
-LDFLAGS = -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -lm
+#LDFLAGS = -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -lm
 #LDFLAGS = -lmkl_intel_lp64 -lmkl_sequential -lmkl_core 
 
 .PHONY: all
 all: $(PROGRAMS)
 
 $(PROGRAMS): %: %.cpp
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
+	g++ $(CXXFLAGS) -march=haswell $(LDFLAGS) -o $@-gnu $<
+	icpc $(CXXFLAGS) -march=core-avx2 -restrict $(LDFLAGS) -o $@-intel $<
 
 .PHONY: clean
 clean:
