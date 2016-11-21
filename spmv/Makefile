@@ -1,5 +1,5 @@
 #PROGRAMS += 88 88_bitmap morton spmv
-PROGRAMS += 88_bitmap
+PROGRAMS += 44_bitmap 88_bitmap
 
 #CXX = icpc
 #CXX = g++
@@ -26,6 +26,7 @@ all: $(PROGRAMS)
 
 $(PROGRAMS): %: %.cpp
 	g++ $(CXXFLAGS) -march=haswell $(LDFLAGS) -o $@-gnu $<
+	g++ $(CXXFLAGS) -march=haswell $(LDFLAGS) -fno-inline -g -o $@-gnu_noinline $<
 	icpc $(CXXFLAGS) -march=core-avx2 -restrict $(LDFLAGS) -o $@-intel $<
 
 .PHONY: clean

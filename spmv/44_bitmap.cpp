@@ -27,22 +27,22 @@
 
 using timer_type = chrono_timer<>;
 
-using real_type = float;
-//using real_type = double;
+//using real_type = float;
+using real_type = double;
 
 // block size fixed 8x8 for now
-static const uint64_t block_size = 8;
-static const uint64_t block_size_exp = 3;
+static const uint64_t block_size = 4;
+static const uint64_t block_size_exp = 2;
 static_assert(block_size == (1UL << block_size_exp), "Block size does not match its exponent.");
 
 // number of blocks per block row / block column
 // (num_blocks * num_blocks * block_size * block_size) elements must fit into memory
 // (num_blocks * num_blocks) elements must not fit into cache
-static const uint64_t num_blocks = 4096;
+static const uint64_t num_blocks = 8192;
 
 static const int num_experiments = 5;
 static const int num_iterations = 8;
-static const int warm_up_iterations = 1;
+static const int warm_up_iterations = 2;
 
 class block_generator
 {
@@ -122,8 +122,8 @@ class block_generator
                         static_assert(block_size_exp < 4, "Block size expected to be less or equal than 16.");
                         indices_.emplace_back((row << 4) + col);
 
-                        static_assert(block_size == 8, "Block size expected to equal 8.");
-                        bitmap_ |= 1UL << ((8 * row) + col);
+                        static_assert(block_size == 4, "Block size expected to equal 4.");
+                        bitmap_ |= 1UL << ((4 * row) + col);
 
                         ++iter;
                     }
@@ -139,7 +139,7 @@ class block_generator
         std::vector<real_type> values_;
 
         std::vector<uint8_t> indices_; // row and column indices
-        uint64_t bitmap_; // bitmap describing block structure
+        uint16_t bitmap_; // bitmap describing block structure
 
         std::mt19937 gen_;
 };
@@ -147,14 +147,50 @@ class block_generator
 class block_bitmap_matrix_t
 {
     public:
-        block_bitmap_matrix_t() : bitmaps_(nullptr), values_(nullptr) { }
+        block_bitmap_matrix_t() : bitmaps_(nullptr), values_(nullptr)
+        {
+            static const uint64_t m = 0xFFFFFFFFFFFFFFFFUL;
+            mask_lookup[0] = _mm256_set_epi64x(0, 0, 0, 0);
+            mask_lookup[1] = _mm256_set_epi64x(0, 0, 0, m);
+            mask_lookup[2] = _mm256_set_epi64x(0, 0, m, 0);
+            mask_lookup[3] = _mm256_set_epi64x(0, 0, m, m);
+            mask_lookup[4] = _mm256_set_epi64x(0, m, 0, 0);
+            mask_lookup[5] = _mm256_set_epi64x(0, m, 0, m);
+            mask_lookup[6] = _mm256_set_epi64x(0, m, m, 0);
+            mask_lookup[7] = _mm256_set_epi64x(0, m, m, m);
+            mask_lookup[8] = _mm256_set_epi64x(m, 0, 0, 0);
+            mask_lookup[9] = _mm256_set_epi64x(m, 0, 0, m);
+            mask_lookup[10] = _mm256_set_epi64x(m, 0, m, 0);
+            mask_lookup[11] = _mm256_set_epi64x(m, 0, m, m);
+            mask_lookup[12] = _mm256_set_epi64x(m, m, 0, 0);
+            mask_lookup[13] = _mm256_set_epi64x(m, m, 0, m);
+            mask_lookup[14] = _mm256_set_epi64x(m, m, m, 0);
+            mask_lookup[15] = _mm256_set_epi64x(m, m, m, m);
+
+            perm_lookup[0] = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0);
+            perm_lookup[1] = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0);
+            perm_lookup[2] = _mm256_set_epi32(7, 6, 5, 4, 1, 0, 3, 2);
+            perm_lookup[3] = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0);
+            perm_lookup[4] = _mm256_set_epi32(7, 6, 1, 0, 5, 4, 3, 2);
+            perm_lookup[5] = _mm256_set_epi32(7, 6, 3, 2, 5, 4, 1, 0);
+            perm_lookup[6] = _mm256_set_epi32(7, 6, 3, 2, 1, 0, 5, 4);
+            perm_lookup[7] = _mm256_set_epi32(7, 6, 3, 2, 1, 0, 5, 4);
+            perm_lookup[8] = _mm256_set_epi32(1, 0, 7, 6, 5, 4, 3, 2);
+            perm_lookup[9] = _mm256_set_epi32(3, 2, 7, 6, 5, 4, 1, 0);
+            perm_lookup[10] = _mm256_set_epi32(3, 2, 7, 6, 1, 0, 5, 4);
+            perm_lookup[11] = _mm256_set_epi32(5, 4, 7, 6, 3, 2, 1, 0);
+            perm_lookup[12] = _mm256_set_epi32(5, 4, 3, 2, 1, 0, 7, 6);
+            perm_lookup[13] = _mm256_set_epi32(5, 4, 3, 2, 7, 6, 1, 0);
+            perm_lookup[14] = _mm256_set_epi32(5, 4, 3, 2, 1, 0, 7, 6);
+            perm_lookup[15] = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0);
+        }
 
         ~block_bitmap_matrix_t() { free(bitmaps_); free(values_); }
 
         void assemble(const block_generator& bgen)
         {
             free(bitmaps_);
-            if (posix_memalign((void**)(&bitmaps_), 64, num_blocks * num_blocks * sizeof(uint64_t)) != 0)
+            if (posix_memalign((void**)(&bitmaps_), 64, num_blocks * num_blocks * sizeof(uint16_t)) != 0)
                 throw std::runtime_error("posix_memalign() error");
 
             const auto& nonzero_values = bgen.nonzero_values();
@@ -166,7 +202,7 @@ class block_bitmap_matrix_t
                         (num_blocks * num_blocks * nonzero_values.size() + 8) * sizeof(real_type)) != 0)
                 throw std::runtime_error("posix_memalign() error");
 
-            uint64_t* bitmaps_ptr = bitmaps_;
+            uint16_t* bitmaps_ptr = bitmaps_;
             real_type* values_ptr = values_;
 
             for (uint64_t brow = 0; brow < num_blocks; brow++) {
@@ -182,14 +218,14 @@ class block_bitmap_matrix_t
 
         void spmv_basic(const real_type* x, real_type* y)
         {
-            uint64_t* bitmaps = bitmaps_;
+            uint16_t* bitmaps = bitmaps_;
             real_type* values = values_;
 
             for (uint64_t brow = 0; brow < num_blocks; brow++) {
                 for (uint64_t bcol = 0; bcol < num_blocks; bcol++) {
                     const real_type* x_ptr = x + (bcol << block_size_exp);
 
-                    uint64_t bitmap = *bitmaps;
+                    uint16_t bitmap = *bitmaps;
                     bitmaps++;
 
                     for (uint64_t lrow = 0; lrow < block_size; lrow++) {
@@ -208,19 +244,19 @@ class block_bitmap_matrix_t
 
         void spmv_basic_row(const real_type* x, real_type* y)
         {
-            uint64_t* bitmaps = bitmaps_;
+            uint16_t* bitmaps = bitmaps_;
             real_type* values = values_;
 
             for (uint64_t brow = 0; brow < num_blocks; brow++) {
                 for (uint64_t bcol = 0; bcol < num_blocks; bcol++) {
                     const real_type* x_ptr = x + (bcol << block_size_exp);
 
-                    uint64_t block_bitmap = *bitmaps;
+                    uint16_t block_bitmap = *bitmaps;
                     bitmaps++;
 
                     for (uint64_t lrow = 0; lrow < block_size; lrow++) {
-                        uint64_t row_bitmap = block_bitmap & 0xFF;
-                        block_bitmap >>= 8;
+                        uint16_t row_bitmap = block_bitmap & 0x0F;
+                        block_bitmap >>= 4;
 
                         if (row_bitmap > 0) {
                             for (uint64_t lcol = 0; lcol < block_size; lcol++) {
@@ -239,18 +275,18 @@ class block_bitmap_matrix_t
 
         void spmv_basic_row_2(const real_type* x, real_type* y)
         {
-            uint64_t* bitmaps = bitmaps_;
+            uint16_t* bitmaps = bitmaps_;
             real_type* values = values_;
 
             for (uint64_t brow = 0; brow < num_blocks; brow++) {
                 for (uint64_t bcol = 0; bcol < num_blocks; bcol++) {
                     const real_type* x_ptr = x + (bcol << block_size_exp);
 
-                    uint64_t block_bitmap = *bitmaps;
+                    uint16_t block_bitmap = *bitmaps;
                     bitmaps++;
 
                     for (uint64_t lrow = 0; lrow < block_size; lrow++) {
-                        uint64_t row_bitmap = (block_bitmap >> (lrow << 3)) & 0xFF;
+                        uint16_t row_bitmap = (block_bitmap >> (lrow << 2)) & 0x0F;
 
                         if (row_bitmap > 0) {
                             for (uint64_t lcol = 0; lcol < block_size; lcol++) {
@@ -269,12 +305,12 @@ class block_bitmap_matrix_t
 
         void spmv_popcnt_lzcnt_blsr(const real_type* x, real_type* y)
         {
-            uint64_t* bitmaps = bitmaps_;
+            uint16_t* bitmaps = bitmaps_;
             real_type* values = values_;
 
             for (uint64_t brow = 0; brow < num_blocks; brow++) {
                 for (uint64_t bcol = 0; bcol < num_blocks; bcol++) {
-                    uint64_t bitmap = *bitmaps;
+                    uint64_t bitmap = (uint64_t)(*bitmaps);
                     bitmaps++;
 
                     const real_type* x_ptr = x + (bcol << block_size_exp);
@@ -282,7 +318,7 @@ class block_bitmap_matrix_t
                     const int64_t nnz = _mm_popcnt_u64(bitmap); // number of set bits
                     for (int64_t l = 0; l < nnz; l++) {
                         const uint8_t k = _lzcnt_u64(bitmap); // number of leading zero bits
-                        *(y + (k >> 3)) += *values * *(x_ptr + (k & 0x07));
+                        *(y + (k >> 2)) += *values * *(x_ptr + (k & 0x03));
                         values++;
                         bitmap = _blsr_u64(bitmap); // reset lowest set bit
                     }
@@ -293,64 +329,70 @@ class block_bitmap_matrix_t
 
         void spmv_temp(const real_type* x, real_type* y)
         {
-/*
-            uint64_t* bitmaps = bitmaps_;
+
+            uint16_t* bitmaps = bitmaps_;
             real_type* values = values_;
 
-            const __m256 rz = _mm256_setzero_ps();
-
             for (uint64_t brow = 0; brow < num_blocks; brow++) {
-                __m256 ry0 = _mm256_setzero_ps();
-                __m256 ry2 = _mm256_setzero_ps();
-                __m256 ry4 = _mm256_setzero_ps();
-                __m256 ry6 = _mm256_setzero_ps();
+                __m256d ry0 = _mm256_setzero_pd();
+                __m256d ry1 = _mm256_setzero_pd();
+                __m256d ry2 = _mm256_setzero_pd();
+                __m256d ry3 = _mm256_setzero_pd();
 
                 for (uint64_t bcol = 0; bcol < num_blocks; bcol++) {
-                    uint64_t bitmap = *bitmaps;
+                    uint16_t bitmap = *bitmaps;
                     bitmaps++;
 
                     const real_type* x_ptr = x + (bcol << block_size_exp);
 
-                    __m256 rx0 = _mm256_load_ps(x_ptr);
-                    __m256 rx2 = _mm256_permutevar8x32_ps(rx0, _mm256_set_epi32(1, 0, 7, 6, 5, 4, 3, 2));
-                    __m256 rx4 = _mm256_permutevar8x32_ps(rx0, _mm256_set_epi32(3, 2, 1, 0, 7, 6, 5, 4));
-                    __m256 rx6 = _mm256_permutevar8x32_ps(rx0, _mm256_set_epi32(5, 4, 3, 2, 1, 0, 7, 6));
+                    __m256d rx0 = _mm256_load_pd(x_ptr);
+                    __m256d rx1 = _mm256_permute4x64_pd(rx0, 0b00111001);
+                    __m256d rx2 = _mm256_permute4x64_pd(rx0, 0b01001110);
+                    __m256d rx3 = _mm256_permute4x64_pd(rx0, 0b10010011);
 
-                    __m256 ra = _mm256_load_ps(values);
+                    uint8_t diag_bitmap_0 = bitmap & 0x0F;
+                    uint8_t diag_bitmap_1 = (bitmap >> 4) & 0x0F;
+                    uint8_t diag_bitmap_2 = (bitmap >> 8) & 0x0F;
+                    uint8_t diag_bitmap_3 = (bitmap >> 12) & 0x0F;
 
-                    uint8_t col_bitmap = bitmap & 0xFF;
-                    __m256 rc = _mm256_permutevar8x32_ps(ra, _mm256_set_epi32(
-                                perm_lookup_[col_bitmap][0], perm_lookup_[col_bitmap][1],
-                                perm_lookup_[col_bitmap][2], perm_lookup_[col_bitmap][3],
-                                perm_lookup_[col_bitmap][4], perm_lookup_[col_bitmap][5],
-                                perm_lookup_[col_bitmap][6], perm_lookup_[col_bitmap][7]));
-                    rc = _mm256_blendv_ps(rc, rz, (const int)col_bitmap);
+                    uint8_t diag_nnz_0 = popcnt_lookup[diag_bitmap_0];
+                    uint8_t diag_nnz_1 = popcnt_lookup[diag_bitmap_1];
+                    uint8_t diag_nnz_2 = popcnt_lookup[diag_bitmap_2];
+                    uint8_t diag_nnz_3 = popcnt_lookup[diag_bitmap_3];
 
-                    ry0 = _mm256_fmadd_ps(rx0, rc, ry0);
-                    ry2 = _mm256_fmadd_ps(rx2, ra, ry2);
-                    ry4 = _mm256_fmadd_ps(rx4, ra, ry4);
-                    ry6 = _mm256_fmadd_ps(rx6, ra, ry6);
+                    uint8_t pp_1 = diag_nnz_0;
+                    uint8_t pp_2 = diag_nnz_0 + diag_nnz_1;
+                    uint8_t pp_3 = diag_nnz_2;
+                    uint8_t pp_4 = diag_nnz_2 + diag_nnz_3;;
+                    pp_3 += pp_2;
+                    pp_4 += pp_2;
 
-                    rx0 = _mm256_permutevar8x32_ps(rx0, _mm256_set_epi32(0, 7, 6, 5, 4, 3, 2, 1));
-                    rx2 = _mm256_permutevar8x32_ps(rx2, _mm256_set_epi32(0, 7, 6, 5, 4, 3, 2, 1));
-                    rx4 = _mm256_permutevar8x32_ps(rx4, _mm256_set_epi32(0, 7, 6, 5, 4, 3, 2, 1));
-                    rx6 = _mm256_permutevar8x32_ps(rx6, _mm256_set_epi32(0, 7, 6, 5, 4, 3, 2, 1));
+                    __m256d rd0 = _mm256_maskload_pd(values, mask_lookup[diag_bitmap_0]);
+                    __m256d rd1 = _mm256_maskload_pd(values + pp_1, mask_lookup[diag_bitmap_1]);
+                    __m256d rd2 = _mm256_maskload_pd(values + pp_2, mask_lookup[diag_bitmap_2]);
+                    __m256d rd3 = _mm256_maskload_pd(values + pp_3, mask_lookup[diag_bitmap_3]);
 
-                    ry0 = _mm256_fmadd_ps(rx0, ra, ry0);
-                    ry2 = _mm256_fmadd_ps(rx2, ra, ry2);
-                    ry4 = _mm256_fmadd_ps(rx4, ra, ry4);
-                    ry6 = _mm256_fmadd_ps(rx6, ra, ry6);
+                    rd0 = (__m256d)_mm256_permutevar8x32_epi32((__m256i)rd0, perm_lookup[diag_bitmap_0]);
+                    rd1 = (__m256d)_mm256_permutevar8x32_epi32((__m256i)rd1, perm_lookup[diag_bitmap_1]);
+                    rd2 = (__m256d)_mm256_permutevar8x32_epi32((__m256i)rd2, perm_lookup[diag_bitmap_2]);
+                    rd3 = (__m256d)_mm256_permutevar8x32_epi32((__m256i)rd3, perm_lookup[diag_bitmap_3]);
+
+                    ry0 = _mm256_fmadd_pd(rx0, rd0, ry0);
+                    ry1 = _mm256_fmadd_pd(rx1, rd1, ry1);
+                    ry2 = _mm256_fmadd_pd(rx2, rd2, ry2);
+                    ry3 = _mm256_fmadd_pd(rx3, rd3, ry3);
+
+                    values += pp_4;
                 }
 
-                __m256 ry = _mm256_load_ps(y);
-                ry0 = _mm256_add_ps(ry0, ry2);
-                ry4 = _mm256_add_ps(ry4, ry6);
-                ry0 = _mm256_add_ps(ry0, ry4);
-                ry = _mm256_add_ps(ry, ry0);
-                _mm256_store_ps(y, ry);
+                __m256d ry = _mm256_load_pd(y);
+                ry0 = _mm256_add_pd(ry0, ry1);
+                ry2 = _mm256_add_pd(ry2, ry3);
+                ry0 = _mm256_add_pd(ry0, ry2);
+                ry = _mm256_add_pd(ry, ry0);
+                _mm256_store_pd(y, ry);
                 y += block_size;
             }
-*/
         }
 
 /*
@@ -395,7 +437,7 @@ class block_bitmap_matrix_t
 
 
 
-
+#if 0
         void spmv(const real_type* RESTRICT x_, real_type* RESTRICT y_)
         {
             const real_type* RESTRICT x = (real_type*)__builtin_assume_aligned(x_, 32);
@@ -617,10 +659,17 @@ class block_bitmap_matrix_t
              // y += block_size;
             }
         }
+#endif
 
     private:
-        uint64_t* RESTRICT bitmaps_; // bitmap for each block in lexicographical order
+        uint16_t* RESTRICT bitmaps_; // bitmap for each block in lexicographical order
         real_type* RESTRICT values_; // same as for block_coo_matrix
+
+        const uint8_t __attribute__((aligned(64))) popcnt_lookup[16]
+            = { 0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4 };
+
+        __m256i __attribute__((aligned(64))) mask_lookup[16];
+        __m256i __attribute__((aligned(64))) perm_lookup[16];
 };
 
 int main(int argc, char* argv[])
