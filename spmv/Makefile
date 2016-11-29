@@ -27,8 +27,8 @@ all: $(PROGRAMS)
 
 $(PROGRAMS): %: %.cpp
 	g++ $(CXXFLAGS) -O3 -march=haswell $(LDFLAGS) -o $@-gnu $<
-	g++ $(CXXFLAGS) -O3 -march=haswell $(LDFLAGS) -fno-inline -g -o $@-gnu_noinline $<
-	g++ $(CXXFLAGS) -g -O0 -march=haswell $(LDFLAGS) -o $@-gnu_debug $<
+#	g++ $(CXXFLAGS) -O3 -march=haswell $(LDFLAGS) -fno-inline -g -o $@-gnu_noinline $<
+#	g++ $(CXXFLAGS) -g -O0 -march=haswell $(LDFLAGS) -o $@-gnu_debug $<
 	icpc $(CXXFLAGS) -O3 -march=core-avx2 -restrict $(LDFLAGS) -o $@-intel $<
 
 .PHONY: clean

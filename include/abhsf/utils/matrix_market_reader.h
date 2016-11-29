@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 
 namespace 
 {
@@ -140,5 +141,55 @@ void matrix_market_reader<T>::close()
         f_ = nullptr;
     }
 }
+
+template <typename ELEMENTS_T>
+void read_mtx_real(const std::string& filename, ELEMENTS_T& elements, matrix_properties& props) 
+{
+    std::cout << red << "Matrix market reader log..." << reset << std::endl;
+
+    matrix_market_reader<> reader(&std::cout);
+    reader.open(filename);
+    
+    props = reader.props();
+
+    if (props.type != matrix_type_t::REAL)
+        throw std::runtime_error("read_matrix_real() invoked for non-real matrix.");
+
+    elements.reserve(props.nnz);
+    bool warned = false; // check zero elements explicit storage :(
+    bool L = false; // check lower/upper triangular parts only for not-unsymmetric matrices
+    bool U = false;
+    for (uintmax_t k = 0; k < props.nnz; k++) {
+        uintmax_t row, col;
+        double val_re;
+        reader.next_element(&row, &col, &val_re);
+
+        if (row > col)
+            L = true;
+        if (col > row)
+            U = true;
+
+        if (val_re == 0.0) {
+            if (warned == false) {
+                std::cout << red << "Matrix file contains zero elements." << reset << std::endl;
+                warned = true;
+            }
+        }
+        else
+            elements.emplace_back(row, col, val_re);
+    }
+
+    if (props.symmetry != matrix_symmetry_t::UNSYMMETRIC) {
+        if ((L == true) && (U == true))
+            throw std::runtime_error("Elements from both L and U parts stored for not-unsymmetric matrix.");
+
+        std::cout << "Matrix symmetric part stored: "
+            << cyan << ((L == true) ? "LOWER" : "UPPER") << reset << std::endl;
+    }
+
+    std::cout << green << "... [DONE]" << reset << std::endl;
+}
+
+
 
 #endif
