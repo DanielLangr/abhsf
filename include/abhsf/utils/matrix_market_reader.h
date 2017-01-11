@@ -75,8 +75,6 @@ void matrix_market_reader<T>::open(const std::string& filename)
     else 
         throw std::runtime_error("Unsupported type of matrix symmetry.");
 
-    if (log_) *log_ << "Type of matrix: " << cyan << props_.shape_str() << ", "
-        << props_.type_str() << ", " << props_.symmetry_str() << reset << std::endl;
     int m, n, nnz;
     if (mm_read_mtx_crd_size(f_, &m, &n, &nnz) != 0) 
         throw std::runtime_error("Could not retrieve matrix sizes.");
@@ -85,6 +83,8 @@ void matrix_market_reader<T>::open(const std::string& filename)
     props_.n = n;
     props_.nnz = nnz;
 
+    if (log_) *log_ << "Type of matrix: " << cyan << props_.shape_str() << ", "
+        << props_.type_str() << ", " << props_.symmetry_str() << reset << std::endl;
     if (log_) *log_ << "Number of rows:             "
         << cyan << std::right << std::setw(20) << props_.m << reset << std::endl;
     if (log_) *log_ << "Number of columns:          "

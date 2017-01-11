@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cmath>
+#include <iomanip>
 #include <iostream>
 #include <numeric>
 #include <string>
@@ -23,6 +24,14 @@
 #else
     #define RESTRICT __restrict__
 #endif
+
+#define PRINT_RESULT(label) \
+    do { \
+        std::cout << std::left << std::setw(36) << label \
+            << yellow << std::right << std::fixed << std::setprecision(1) << std::setw(10) \
+            << n_mflops / timer.seconds() << reset << ", result = " << green << std::setprecision(3) \
+            << result(y, y + props.m) / (double)(warmup_iters + n_iters) << reset << std::endl; \
+    } while (0)
 
 static const int warmup_iters = 10;
 static const int n_iters = 100;
@@ -74,6 +83,7 @@ class csr_matrix
 
         void spmv(const real_type* RESTRICT x, real_type* RESTRICT y)
         {
+#pragma omp parallel for
             for (MKL_INT row = 0; row < m_; row++) 
                 for (MKL_INT k = ia_[row]; k < ia_[row + 1]; k++)
                     y[row] += a_[k] * x[ja_[k]];
@@ -108,18 +118,22 @@ class csr_matrix
 class delta_matrix 
 {
     public:
+        delta_matrix() : a_(nullptr), da_(nullptr) { }
+        ~delta_matrix() { release(); }
+
         void from_elements(elements_t& elements, const matrix_properties& props)
         {
             std::sort(elements.begin(), elements.end());
 
             nnz_ = elements.size();
-            a_.reserve(nnz_);
-            da_.reserve(nnz_);
+
+            posix_memalign((void**)(&a_), 64, nnz_ * sizeof(real_type));
+            posix_memalign((void**)(&da_), 64, nnz_ * sizeof(uint32_t));
 
             uint64_t previous = 0;
-            for (const auto& elem : elements) {
-                auto row = std::get<0>(elem);
-                auto col = std::get<1>(elem);
+            for (size_t k = 0; k < nnz_; k += 1) {
+                auto row = std::get<0>(elements[k]);
+                auto col = std::get<1>(elements[k]);
 
                 assert(row < (1UL << 31));
                 assert(col < (1UL << 31));
@@ -129,8 +143,8 @@ class delta_matrix
 
                 assert(delta < (1UL << 32));
 
-                a_.emplace_back(std::get<2>(elem));
-                da_.emplace_back((uint32_t)delta);
+                a_[k] = std::get<2>(elements[k]);
+                da_[k] = (uint32_t)delta;
 
                 previous = current;
             }
@@ -140,31 +154,68 @@ class delta_matrix
         {
             uint64_t previous = 0;
             for (size_t k = 0; k < nnz_; k++) {
-             // uint64_t current = previous + (uint64_t)da_[k];
+                uint64_t current = previous + (uint64_t)da_[k];
 
-             // uint64_t row = current >> 31;
-             // uint64_t col = current & ((1UL << 31) - 1);
-                uint64_t row = 0;
-                uint64_t col = 0;
+                uint64_t row = current >> 31;
+                uint64_t col = current & ((1UL << 31) - 1);
 
                 y[row] += a_[k] * x[col];
 
-             // previous = current;
+                previous = current;
             }
+        }
+
+        void spmv_(const real_type* RESTRICT x, real_type* RESTRICT y)
+        {
+            uint64_t previous = 0;
+
+            uint64_t current_row = 0;
+            real_type y_ = y[0];
+
+            for (size_t k = 0; k < nnz_; k++) {
+                uint64_t current = previous + (uint64_t)da_[k];
+
+                uint64_t row = current >> 31;
+                uint64_t col = current & ((1UL << 31) - 1);
+
+                if (row != current_row) {
+                    y[current_row] = y_;
+                    current_row = row;
+                    y_ = y[row];
+                }
+
+                y_ += a_[k] * x[col];
+
+                previous = current;
+            }
+
+            y[current_row] = y_;
+        }
+
+        void spmv_temp(const real_type* RESTRICT x, real_type* RESTRICT y)
+        {
+            real_type x_ = x[0];
+            real_type y_ = y[0];
+
+#pragma omp parallel for reduction(+:y_)
+            for (size_t k = 0; k < nnz_; k++) 
+                y_ += x_ * a_[k];
+
+            y[0] = y_;
         }
 
         void release()
         {
-            a_.clear();
-            a_.shrink_to_fit();
-            da_.clear();
-            da_.shrink_to_fit();
+            free(a_);
+            a_ = nullptr;
+            free(da_);
+            da_ = nullptr;
         }
 
     private:
         uintmax_t nnz_;
-        std::vector<real_type> a_;
-        std::vector<uint32_t> da_;
+        real_type* RESTRICT a_;
+        uint32_t* RESTRICT da_;
 };
 
 class delta_vect_matrix 
@@ -196,6 +247,7 @@ class delta_vect_matrix
                         uint64_t delta = current - previous;
 
                         assert(delta < (1UL << 32));
+
                         a_[k + i] = std::get<2>(elements[k + i]);
                         da_[k + i] = delta;
 
@@ -377,7 +429,7 @@ int main(int argc, char* argv[])
     matrix_properties props;
     read_mtx_real(argv[1], elements, props);
 
-    uintmax_t nnz_stored = elements.size();
+    const uintmax_t nnz_stored = elements.size();
     uintmax_t nnz_all = 0;
     for (auto& elem : elements) {
         nnz_all++;
@@ -419,8 +471,7 @@ int main(int argc, char* argv[])
     for (int iter = 0; iter < n_iters; iter++) 
         csr.spmv(x, y);
     timer.stop();
-    std::cout << "Measured MFLOP/S naive CSR: " << yellow << n_mflops / timer.seconds() << reset << ", result = "
-        << green << result(y, y + props.m) / (double)(warmup_iters + n_iters) << reset << std::endl;
+    PRINT_RESULT("Measured MFLOP/s naive CSR:");
 
     // MKL CSR32
     std::fill(y, y + props.m, 0.0);
@@ -430,8 +481,7 @@ int main(int argc, char* argv[])
     for (int iter = 0; iter < n_iters; iter++) 
         csr.spmv_mkl(x, y);
     timer.stop();
-    std::cout << "Measured MFLOP/S MKL CSR: " << yellow << n_mflops / timer.seconds() << reset << ", result = "
-        << green << result(y, y + props.m) / (double)(warmup_iters + n_iters) << reset << std::endl;
+    PRINT_RESULT("Measured MFLOP/s MKL CSR:");
 
     csr.release();
 
@@ -446,11 +496,19 @@ int main(int argc, char* argv[])
     for (int iter = 0; iter < n_iters; iter++) 
         delta.spmv(x, y);
     timer.stop();
-    std::cout << "Measured MFLOP/S delta: " << yellow << n_mflops / timer.seconds() << reset << ", result = "
-        << green << result(y, y + props.m) / (double)(warmup_iters + n_iters) << reset << std::endl;
+    PRINT_RESULT("Measured MFLOP/s delta:");
+
+    std::fill(y, y + props.m, 0.0);
+    for (int iter = 0; iter < warmup_iters; iter++) 
+        delta.spmv_temp(x, y);
+    timer.start();
+    for (int iter = 0; iter < n_iters; iter++) 
+        delta.spmv_temp(x, y);
+    timer.stop();
+    PRINT_RESULT("Measured MFLOP/s delta temp:");
 
     delta.release();
-
+/*
     // delta with vectorization
     delta_vect_matrix delta_v;
     delta_v.from_elements(elements, props);
@@ -462,8 +520,7 @@ int main(int argc, char* argv[])
     for (int iter = 0; iter < n_iters; iter++) 
         delta_v.spmv_0(x, y);
     timer.stop();
-    std::cout << "Measured MFLOP/S delta w/ vect 0: " << yellow << n_mflops / timer.seconds() << reset
-        << ", result = " << green << result(y, y + props.m) / (double)(warmup_iters + n_iters) << reset << std::endl;
+    PRINT_RESULT("Measured MFLOP/s delta w/ vect 0:");
 
     std::fill(y, y + props.m, 0.0);
     for (int iter = 0; iter < warmup_iters; iter++) 
@@ -472,8 +529,7 @@ int main(int argc, char* argv[])
     for (int iter = 0; iter < n_iters; iter++) 
         delta_v.spmv_1(x, y);
     timer.stop();
-    std::cout << "Measured MFLOP/S delta w/ vect 1: " << yellow << n_mflops / timer.seconds() << reset
-        << ", result = " << green << result(y, y + props.m) / (double)(warmup_iters + n_iters) << reset << std::endl;
+    PRINT_RESULT("Measured MFLOP/s delta w/ vect 1:");
 
     std::fill(y, y + props.m, 0.0);
     for (int iter = 0; iter < warmup_iters; iter++) 
@@ -482,11 +538,10 @@ int main(int argc, char* argv[])
     for (int iter = 0; iter < n_iters; iter++) 
         delta_v.spmv_2(x, y);
     timer.stop();
-    std::cout << "Measured MFLOP/S delta w/ vect 2: " << yellow << n_mflops / timer.seconds() << reset
-        << ", result = " << green << result(y, y + props.m) / (double)(warmup_iters + n_iters) << reset << std::endl;
+    PRINT_RESULT("Measured MFLOP/S delta w/ vect 2:");
 
     delta_v.release();
-
+*/
     free(x);
     free(y);
 }
