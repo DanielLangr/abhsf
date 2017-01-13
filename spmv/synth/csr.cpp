@@ -88,6 +88,15 @@ class csr_matrix
                     y[row] += a_[k] * x[ja_[k]];
         }
 
+        void spmv_1(const real_type* RESTRICT x, real_type* RESTRICT y)
+        {
+#pragma omp parallel for
+            for (MKL_INT row = 0; row < m_; row++) {
+                MKL_INT k = ia_[row];
+                y[row] += a_[k] * x[ja_[k]];
+            }
+        }
+
         void spmv_mkl(const real_type* RESTRICT x, real_type* RESTRICT y)
         {
             static const char transa = 'N';
@@ -191,6 +200,32 @@ int main(int argc, char* argv[])
         for (size_t j = 0; j < props.n; j++)
             elements.emplace_back(props.m - 1, j, 1.0);
     }
+    else if (mattype == 4) {
+        // single-column matrix
+        std::cout << "Matrix: " << yellow << "SINGLE-COLUMN" << reset << std::endl;
+
+        props.symmetry = matrix_symmetry_t::UNSYMMETRIC;
+        props.type = matrix_type_t::REAL;
+        props.m = props.n = 500000000L;
+        props.nnz = props.m;
+
+        elements.reserve(props.nnz);
+        for (size_t i = 0; i < props.m; i++)
+            elements.emplace_back(i, 0, 1.0);
+    }
+    else if (mattype == 5) {
+        // single-row matrix
+        std::cout << "Matrix: " << yellow << "SINGLE-ROW" << reset << std::endl;
+
+        props.symmetry = matrix_symmetry_t::UNSYMMETRIC;
+        props.type = matrix_type_t::REAL;
+        props.m = props.n = 500000000L;
+        props.nnz = props.m;
+
+        elements.reserve(props.nnz);
+        for (size_t i = 0; i < props.n; i++)
+            elements.emplace_back(props.m - 1, i, 1.0);
+    }
     else 
         throw std::runtime_error("Matrix type has not been specified!");
 
@@ -227,6 +262,16 @@ int main(int argc, char* argv[])
         csr.spmv(x, y);
     timer.stop();
     PRINT_RESULT("Measured MFLOP/s naive CSR:");
+
+    // naive CSR32 - single element per row
+    std::fill(y, y + props.m, 0.0);
+    for (int iter = 0; iter < warmup_iters; iter++) 
+        csr.spmv_1(x, y);
+    timer.start();
+    for (int iter = 0; iter < n_iters; iter++) 
+        csr.spmv_1(x, y);
+    timer.stop();
+    PRINT_RESULT("Measured MFLOP/s naive CSR-1:");
 
     // MKL CSR32
     std::fill(y, y + props.m, 0.0);

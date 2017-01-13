@@ -1,4 +1,4 @@
-PROGRAMS += synth
+PROGRAMS += coo csr
 
 #CXX = icpc
 #CXX = g++
@@ -24,7 +24,11 @@ LDFLAGSMIC = -L${MKLROOT}/lib/mic -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core
 .PHONY: all
 all: $(PROGRAMS)
 
-synth: synth.cpp
+coo: coo.cpp
+	icpc $(CXXFLAGS) -O3 -xCORE-AVX2 -restrict -wd3180 $(LDFLAGS) -o $@-intel $<
+	icpc $(CXXFLAGS) -O3 -xCORE-AVX2 -qopenmp -restrict $(LDFLAGSOMP) -o $@-intel_omp $<
+
+csr: csr.cpp
 	icpc $(CXXFLAGS) -O3 -xCORE-AVX2 -restrict -wd3180 $(LDFLAGS) -o $@-intel $<
 	icpc $(CXXFLAGS) -O3 -xCORE-AVX2 -qopenmp -restrict $(LDFLAGSOMP) -o $@-intel_omp $<
 #	icpc $(CXXFLAGS) -O3 -mmic -qopenmp -restrict $(LDFLAGSMIC) -o $@-intel_mic $<
