@@ -1,10 +1,12 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <numeric>
+#include <random>
 #include <string>
 #include <stdexcept>
 #include <tuple>
@@ -14,6 +16,11 @@
 
 #ifdef HAVE_MKL
     #include <mkl.h>
+#endif
+
+#ifdef HAVE_CUDA
+    #include <cuda_runtime.h>
+    #include <cusparse.h>
 #endif
 
 #include <abhsf/utils/colors.h>
@@ -35,8 +42,8 @@
             << result(y, y + props.m) / (double)(warmup_iters + n_iters) << reset << std::endl; \
     } while (0)
 
-static const int warmup_iters = 4;
-static const int n_iters = 20;
+static const int warmup_iters = 8;
+static const int n_iters = 40;
 
 using timer_type = chrono_timer<>;
 
@@ -61,13 +68,13 @@ class csr_matrix
 
             m_ = props.m;
             n_ = props.n;
-            const size_t nnz = elements.size();
+            nnz_ = elements.size();
 
-            a_.resize(nnz);
+            a_.resize(nnz_);
             ia_.resize(m_ + 1);
-            ja_.resize(nnz);
+            ja_.resize(nnz_);
 
-            for (size_t k = 0; k < nnz; k++) {
+            for (size_t k = 0; k < nnz_; k++) {
                 a_[k] = std::get<2>(elements[k]);
                 ja_[k] = std::get<1>(elements[k]);
             }
@@ -76,15 +83,37 @@ class csr_matrix
             size_t k = 0;
             size_t row = 0;
 
-            while (k < nnz) {
-                while ((k < nnz) && (row == std::get<0>(elements[k])))
+            while (k < nnz_) {
+                while ((k < nnz_) && (row == std::get<0>(elements[k])))
                     k++;
 
                 row++;
                 ia_[row] = k;
             }
 
-            assert(ia_[m_] == nnz);
+            assert(ia_[m_] == nnz_);
+
+#ifdef HAVE_CUDA
+            static_assert(sizeof(index_type) == sizeof(int), "Indexing type must be int");
+
+            if (cudaMalloc((void**)&ca_, nnz_ * sizeof(real_type)) != cudaSuccess)
+                throw std::runtime_error("Error running cudaMalloc function!");
+            if (cudaMalloc((void**)&cia_, (m_ + 1) * sizeof(index_type)) != cudaSuccess)
+                throw std::runtime_error("Error running cudaMalloc function!");
+            if (cudaMalloc((void**)&cja_, nnz_ * sizeof(index_type)) != cudaSuccess)
+                throw std::runtime_error("Error running cudaMalloc function!");
+            if (cudaMemcpy(ca_, a_.data(), nnz_ * sizeof(real_type), cudaMemcpyHostToDevice) != cudaSuccess)
+                throw std::runtime_error("Error running cudaMemcpy function!");
+            if (cudaMemcpy(cia_, ia_.data(), (m_ + 1) * sizeof(index_type), cudaMemcpyHostToDevice) != cudaSuccess)
+                throw std::runtime_error("Error running cudaMemcpy function!");
+            if (cudaMemcpy(cja_, ja_.data(), nnz_ * sizeof(index_type), cudaMemcpyHostToDevice) != cudaSuccess)
+                throw std::runtime_error("Error running cudaMemcpy function!");
+
+            if (cusparseCreateMatDescr(&cdescr_) != CUSPARSE_STATUS_SUCCESS)
+                throw std::runtime_error("Error running cusparseCreateMatDescr function!");
+            cusparseSetMatType(cdescr_, CUSPARSE_MATRIX_TYPE_GENERAL);
+            cusparseSetMatIndexBase(cdescr_, CUSPARSE_INDEX_BASE_ZERO);
+#endif
         }
 
         void spmv(const real_type* RESTRICT x, real_type* RESTRICT y)
@@ -107,6 +136,19 @@ class csr_matrix
         }
 #endif
 
+#ifdef HAVE_CUDA
+        void spmv_cusparse(const real_type* x, real_type* y, cusparseHandle_t handle)
+        {
+            static const double alpha = 1.0;
+            if (cusparseDcsrmv(
+                    handle, CUSPARSE_OPERATION_NON_TRANSPOSE, m_, n_, nnz_, &alpha, cdescr_,
+                    ca_, cia_, cja_, x, &alpha, y) != CUSPARSE_STATUS_SUCCESS)
+                throw std::runtime_error("Error running cusparseDcsrmv function!");
+            if (cudaDeviceSynchronize() != cudaSuccess)
+                throw std::runtime_error("Error running cudaDeviceSynchronize function!");
+        }
+#endif
+
         void release()
         {
             a_.clear();
@@ -115,13 +157,27 @@ class csr_matrix
             ia_.shrink_to_fit();
             ja_.clear();
             ja_.shrink_to_fit();
+
+#ifdef HAVE_CUDA
+            cusparseDestroyMatDescr(cdescr_);
+            if (ca_) cudaFree(ca_);
+            if (cia_) cudaFree(cia_);
+            if (cja_) cudaFree(cja_);
+#endif
         }
 
     private:
         std::vector<real_type> a_;
         std::vector<index_type> ia_;
         std::vector<index_type> ja_;
-        index_type m_, n_;
+        index_type m_, n_, nnz_;
+
+#ifdef HAVE_CUDA
+        real_type* ca_;
+        index_type* cia_;
+        index_type* cja_;
+        cusparseMatDescr_t cdescr_;
+#endif
 };
 
 template <typename Iter>
@@ -139,7 +195,89 @@ int main(int argc, char* argv[])
 {
     elements_t elements;
     matrix_properties props;
-    read_mtx_real(argv[1], elements, props);
+
+    // matrix type selection
+    if (strcmp(argv[1], "dense") == 0) {
+        std::cout << "Matrix: " << yellow << "DENSE" << reset << std::endl;
+
+        props.symmetry = matrix_symmetry_t::UNSYMMETRIC;
+        props.type = matrix_type_t::REAL;
+        props.m = props.n = 20000;
+        props.nnz = props.m * props.n;
+
+        elements.reserve(props.nnz);
+        for (size_t i = 0; i < props.m; i++)
+            for (size_t j = 0; j < props.n; j++)
+                elements.emplace_back(i, j, 1.0);
+    }
+    else if (strcmp(argv[1], "diagonal") == 0) {
+        std::cout << "Matrix: " << yellow << "DIAGONAL" << reset << std::endl;
+
+        props.symmetry = matrix_symmetry_t::UNSYMMETRIC;
+        props.type = matrix_type_t::REAL;
+        props.m = props.n = 200000000L;
+        props.nnz = props.m;
+
+        elements.reserve(props.nnz);
+        for (size_t i = 0; i < props.m; i++)
+            elements.emplace_back(i, i, 1.0);
+    }
+    else if (strcmp(argv[1], "single-column") == 0) {
+        std::cout << "Matrix: " << yellow << "SINGLE-COLUMN" << reset << std::endl;
+
+        props.symmetry = matrix_symmetry_t::UNSYMMETRIC;
+        props.type = matrix_type_t::REAL;
+        props.m = props.n = 200000000L;
+        props.nnz = props.m;
+
+        elements.reserve(props.nnz);
+        for (size_t i = 0; i < props.m; i++)
+            elements.emplace_back(i, 0, 1.0);
+    }
+    else if (strcmp(argv[1], "random-column") == 0) {
+        std::cout << "Matrix: " << yellow << "RANDOM-COLUMN" << reset << std::endl;
+
+        props.symmetry = matrix_symmetry_t::UNSYMMETRIC;
+        props.type = matrix_type_t::REAL;
+        props.m = props.n = 200000000L;
+        props.nnz = props.m;
+
+        std::random_device rd;
+        std::mt19937 mt(rd());
+        std::uniform_int_distribution<int> dist(0, props.n - 1);
+
+        elements.reserve(props.nnz);
+        for (size_t i = 0; i < props.m; i++)
+            elements.emplace_back(i, dist(mt), 1.0);
+    }
+    else if (strcmp(argv[1], "single-row-column") == 0) {
+        std::cout << "Matrix: " << yellow << "SINGLE-ROW-COLUMN" << reset << std::endl;
+
+        props.symmetry = matrix_symmetry_t::UNSYMMETRIC;
+        props.type = matrix_type_t::REAL;
+        props.m = props.n = 100000000L;
+        props.nnz = props.m + props.n - 1;
+
+        elements.reserve(props.nnz);
+        for (size_t i = 0; i < props.m - 1; i++)
+            elements.emplace_back(i, 0, 1.0);
+        for (size_t j = 0; j < props.n; j++)
+            elements.emplace_back(0, j, 1.0);
+    }
+    else if (strcmp(argv[1], "single-row") == 0) {
+        std::cout << "Matrix: " << yellow << "SINGLE-ROW" << reset << std::endl;
+
+        props.symmetry = matrix_symmetry_t::UNSYMMETRIC;
+        props.type = matrix_type_t::REAL;
+        props.m = props.n = 500000000L;
+        props.nnz = props.m;
+
+        elements.reserve(props.nnz);
+        for (size_t i = 0; i < props.n; i++)
+            elements.emplace_back(props.m - 1, i, 1.0);
+    }
+    else 
+        read_mtx_real(argv[1], elements, props);
 
     const uintmax_t nnz_stored = elements.size();
     uintmax_t nnz_all = 0;
@@ -157,18 +295,32 @@ int main(int argc, char* argv[])
     std::cout << "sizeof(real_type):  " << cyan << sizeof(real_type)  << reset << std::endl;
 
     assert(props.m == props.n);
+    static const double x_element = 0.5;
  // std::vector<real_type> x(props.n, 0.5);
  // std::vector<real_type> y(props.m, 0.0);
     real_type *x, *y;
     posix_memalign((void**)(&x), 64, props.n * sizeof(real_type));
     posix_memalign((void**)(&y), 64, props.m * sizeof(real_type));
-    std::fill(x, x + props.n, 0.5);
+    std::fill(x, x + props.n, x_element);
     std::fill(y, y + props.m, 0.0);
 
+#ifdef HAVE_CUDA
+    real_type *cx, *cy;
+    if (cudaMalloc((void**)&cx, props.n * sizeof(real_type)) != cudaSuccess)
+        throw std::runtime_error("Error running cudaMalloc function!");
+    if (cudaMalloc((void**)&cy, props.m * sizeof(real_type)) != cudaSuccess)
+        throw std::runtime_error("Error running cudaMalloc function!");
+    if (cudaMemcpy(cx, x, props.n * sizeof(real_type), cudaMemcpyHostToDevice) != cudaSuccess)
+        throw std::runtime_error("Error running cudaMemcpy function!");
+#endif
+
     // verification
+    std::vector<double> y_temp(props.m, 0.0);
     for (const auto& element : elements) 
-        y[std::get<0>(element)] += std::get<2>(element) * x[std::get<1>(element)];
-    std::cout << "Expected result = " << green << result(y, y + props.n) << reset << std::endl;
+        y_temp[std::get<0>(element)] += std::get<2>(element) * x_element;
+    std::cout << "Expected result = " << green << result(y_temp.cbegin(), y_temp.cend()) << reset << std::endl;
+    y_temp.clear();
+    y_temp.shrink_to_fit();
 
     const double n_mflops = (double)(nnz_all * 2 * n_iters) / 1.0e6;
 
@@ -200,8 +352,34 @@ int main(int argc, char* argv[])
     PRINT_RESULT("Measured MFLOP/s MKL CSR:");
 #endif
 
+#ifdef HAVE_CUDA
+    cusparseHandle_t handle;
+    if (cusparseCreate(&handle) != CUSPARSE_STATUS_SUCCESS)
+        throw std::runtime_error("Error running cusparseCreate function!");
+
+    std::fill(y, y + props.m, 0.0);
+    if (cudaMemcpy(cy, y, props.m * sizeof(real_type), cudaMemcpyHostToDevice) != cudaSuccess)
+        throw std::runtime_error("Error running cudaMemcpy function!");
+    for (int iter = 0; iter < warmup_iters; iter++) 
+        csr.spmv_cusparse(cx, cy, handle);
+    timer.start();
+    for (int iter = 0; iter < n_iters; iter++) 
+        csr.spmv_cusparse(cx, cy, handle);
+    timer.stop();
+    if (cudaMemcpy(y, cy, props.m * sizeof(real_type), cudaMemcpyDeviceToHost) != cudaSuccess)
+        throw std::runtime_error("Error running cudaMemcpy function!");
+    PRINT_RESULT("Measured MFLOP/s cuSPARSE CSR:");
+
+    cusparseDestroy(handle);
+#endif
+
     csr.release();
 
     free(x);
     free(y);
+
+#ifdef HAVE_CUDA
+    if (x) cudaFree(x);
+    if (y) cudaFree(y);
+#endif
 }
