@@ -38,6 +38,7 @@ delta: delta.cpp
 
 mb: mb.cpp
 	icpc -std=c++11 -O3 -xCORE-AVX2 -qopenmp -restrict -o $@-intel_omp $<
+	icpc -std=c++11 -O3 -mmic -qopenmp -restrict -o $@-intel_mic $<
 
 .PHONY: clean
 clean:
