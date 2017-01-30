@@ -254,7 +254,7 @@ class coo_matrix
             static const double alpha = 1.0;
             static const char matdescra[6] = { 'G', ' ', ' ', 'C', ' ', ' ' };
             mkl_dcoomv(&transa, &m_, &n_, &alpha, matdescra, 
-                    a_.data(), ia_.data(), ja_.data(), &nnz, x, &alpha, y);
+                    a_.data(), ia_.data(), ja_.data(), &nnz_, x, &alpha, y);
         }
 #endif
 
@@ -419,32 +419,32 @@ int main(int argc, char* argv[])
 
     const double n_mflops = (double)(nnz_all * 2 * n_iters) / 1.0e6;
 
-    // CSR
-    csr_matrix csr;
-    csr.from_elements(elements, props);
+ // csr_matrix A;
+    coo_matrix A;
+    A.from_elements(elements, props);
 
     timer_type timer;
 /*
-    // naive CSR32
+    // naive 
     std::fill(y, y + props.m, 0.0);
     for (int iter = 0; iter < warmup_iters; iter++) 
-        csr.spmv(x, y);
+        A.spmv(x, y);
     timer.start();
     for (int iter = 0; iter < n_iters; iter++) 
-        csr.spmv(x, y);
+        A.spmv(x, y);
     timer.stop();
     PRINT_RESULT("Measured MFLOP/s naive CSR:");
 */
-    // MKL CSR32
+    // MKL 
 #ifdef HAVE_MKL
     std::fill(y, y + props.m, 0.0);
     for (int iter = 0; iter < warmup_iters; iter++) 
-        csr.spmv_mkl(x, y);
+        A.spmv_mkl(x, y);
     timer.start();
     for (int iter = 0; iter < n_iters; iter++) 
-        csr.spmv_mkl(x, y);
+        A.spmv_mkl(x, y);
     timer.stop();
-    PRINT_RESULT("Measured MFLOP/s MKL CSR:");
+    PRINT_RESULT("Measured MFLOP/s MKL:");
 #endif
 
 #ifdef HAVE_CUDA
@@ -452,29 +452,29 @@ int main(int argc, char* argv[])
     if (cusparseCreate(&handle) != CUSPARSE_STATUS_SUCCESS)
         throw std::runtime_error("Error running cusparseCreate function!");
 
-    csr.to_hyb(handle);
+    A.to_hyb(handle);
 
     std::fill(y, y + props.m, 0.0);
     if (cudaMemcpy(cy, y, props.m * sizeof(real_type), cudaMemcpyHostToDevice) != cudaSuccess)
         throw std::runtime_error("Error running cudaMemcpy function!");
     for (int iter = 0; iter < warmup_iters; iter++) 
-     // csr.spmv_cusparse_mp(cx, cy, handle); // available since CUDA 8.0
-     // csr.spmv_cusparse(cx, cy, handle);
-        csr.spmv_cusparse_hyb(cx, cy, handle);
+     // A.spmv_cusparse_mp(cx, cy, handle); // available since CUDA 8.0
+     // A.spmv_cusparse(cx, cy, handle);
+        A.spmv_cusparse_hyb(cx, cy, handle);
     timer.start();
     for (int iter = 0; iter < n_iters; iter++) 
-     // csr.spmv_cusparse_mp(cx, cy, handle);
-     // csr.spmv_cusparse(cx, cy, handle);
-        csr.spmv_cusparse_hyb(cx, cy, handle);
+     // A.spmv_cusparse_mp(cx, cy, handle);
+     // A.spmv_cusparse(cx, cy, handle);
+        A.spmv_cusparse_hyb(cx, cy, handle);
     timer.stop();
     if (cudaMemcpy(y, cy, props.m * sizeof(real_type), cudaMemcpyDeviceToHost) != cudaSuccess)
         throw std::runtime_error("Error running cudaMemcpy function!");
-    PRINT_RESULT("Measured MFLOP/s cuSPARSE CSR:");
+    PRINT_RESULT("Measured MFLOP/s cuSPARSE:");
 
     cusparseDestroy(handle);
 #endif
 
-    csr.release();
+    A.release();
 
     free(x);
     free(y);
