@@ -42,8 +42,8 @@
             << result(y, y + props.m) / (double)(warmup_iters + n_iters) << reset << std::endl; \
     } while (0)
 
-static const int warmup_iters = 8;
-static const int n_iters = 40;
+static const int warmup_iters = 5;
+static const int n_iters = 20;
 
 using timer_type = chrono_timer<>;
 
@@ -116,6 +116,17 @@ class csr_matrix
 #endif
         }
 
+#ifdef HAVE_CUDA
+        void to_hyb (cusparseHandle_t handle)
+        {
+            if (cusparseCreateHybMat(&chybmat_) != CUSPARSE_STATUS_SUCCESS)
+                throw std::runtime_error("Error running cusparseCreateHybMat function!");
+            if (cusparseDcsr2hyb(handle, m_, n_, cdescr_,
+                        ca_, cia_, cja_, chybmat_, 0, CUSPARSE_HYB_PARTITION_AUTO) != CUSPARSE_STATUS_SUCCESS)
+                throw std::runtime_error("Error running cusparseDcsr2hyb function!");
+        }
+#endif
+
         void spmv(const real_type* RESTRICT x, real_type* RESTRICT y)
         {
 #pragma omp parallel for
@@ -147,6 +158,29 @@ class csr_matrix
             if (cudaDeviceSynchronize() != cudaSuccess)
                 throw std::runtime_error("Error running cudaDeviceSynchronize function!");
         }
+/*
+        // CUDA 8.0 and later
+        void spmv_cusparse_mp(const real_type* x, real_type* y, cusparseHandle_t handle)
+        {
+            static const double alpha = 1.0;
+            if (cusparseDcsrmv_mp(
+                    handle, CUSPARSE_OPERATION_NON_TRANSPOSE, m_, n_, nnz_, &alpha, cdescr_,
+                    ca_, cia_, cja_, x, &alpha, y) != CUSPARSE_STATUS_SUCCESS)
+                throw std::runtime_error("Error running cusparseDcsrmv function!");
+            if (cudaDeviceSynchronize() != cudaSuccess)
+                throw std::runtime_error("Error running cudaDeviceSynchronize function!");
+        }
+*/
+
+        void spmv_cusparse_hyb(const real_type* x, real_type* y, cusparseHandle_t handle)
+        {
+            static const double alpha = 1.0;
+            if (cusparseDhybmv(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                        &alpha, cdescr_, chybmat_, x, &alpha, y) != CUSPARSE_STATUS_SUCCESS)
+                throw std::runtime_error("Error running cusparseDhybmv function!");
+            if (cudaDeviceSynchronize() != cudaSuccess)
+                throw std::runtime_error("Error running cudaDeviceSynchronize function!");
+        }
 #endif
 
         void release()
@@ -159,6 +193,7 @@ class csr_matrix
             ja_.shrink_to_fit();
 
 #ifdef HAVE_CUDA
+            cusparseDestroyHybMat(chybmat_);
             cusparseDestroyMatDescr(cdescr_);
             if (ca_) cudaFree(ca_);
             if (cia_) cudaFree(cia_);
@@ -177,7 +212,67 @@ class csr_matrix
         index_type* cia_;
         index_type* cja_;
         cusparseMatDescr_t cdescr_;
+        cusparseHybMat_t chybmat_;
 #endif
+};
+
+class coo_matrix
+{
+    public:
+        void from_elements(elements_t& elements, const matrix_properties& props)
+        {
+            std::sort(elements.begin(), elements.end());
+
+            m_ = props.m;
+            n_ = props.n;
+            nnz_ = elements.size();
+
+            a_.resize(nnz_);
+            ia_.resize(nnz_);
+            ja_.resize(nnz_);
+
+            for (size_t k = 0; k < nnz_; k++) {
+                a_[k] = std::get<2>(elements[k]);
+                ia_[k] = std::get<0>(elements[k]);
+                ja_[k] = std::get<1>(elements[k]);
+            }
+        }
+/*
+        void spmv(const real_type* RESTRICT x, real_type* RESTRICT y)
+        {
+#pragma omp parallel for
+            for (index_type row = 0; row < m_; row++) 
+                for (index_type k = ia_[row]; k < ia_[row + 1]; k++)
+                    y[row] += a_[k] * x[ja_[k]];
+        }
+*/
+
+#ifdef HAVE_MKL
+        void spmv_mkl(const real_type* RESTRICT x, real_type* RESTRICT y)
+        {
+            static const char transa = 'N';
+            static const double alpha = 1.0;
+            static const char matdescra[6] = { 'G', ' ', ' ', 'C', ' ', ' ' };
+            mkl_dcoomv(&transa, &m_, &n_, &alpha, matdescra, 
+                    a_.data(), ia_.data(), ja_.data(), &nnz, x, &alpha, y);
+        }
+#endif
+
+        void release()
+        {
+            a_.clear();
+            a_.shrink_to_fit();
+            ia_.clear();
+            ia_.shrink_to_fit();
+            ja_.clear();
+            ja_.shrink_to_fit();
+        }
+
+    private:
+        std::vector<real_type> a_;
+        std::vector<index_type> ia_;
+        std::vector<index_type> ja_;
+        index_type m_, n_, nnz_;
 };
 
 template <typename Iter>
@@ -259,17 +354,17 @@ int main(int argc, char* argv[])
         props.nnz = props.m + props.n - 1;
 
         elements.reserve(props.nnz);
-        for (size_t i = 0; i < props.m - 1; i++)
-            elements.emplace_back(i, 0, 1.0);
         for (size_t j = 0; j < props.n; j++)
             elements.emplace_back(0, j, 1.0);
+        for (size_t i = 1; i < props.m; i++)
+            elements.emplace_back(i, 0, 1.0);
     }
     else if (strcmp(argv[1], "single-row") == 0) {
         std::cout << "Matrix: " << yellow << "SINGLE-ROW" << reset << std::endl;
 
         props.symmetry = matrix_symmetry_t::UNSYMMETRIC;
         props.type = matrix_type_t::REAL;
-        props.m = props.n = 500000000L;
+        props.m = props.n = 200000000L;
         props.nnz = props.m;
 
         elements.reserve(props.nnz);
@@ -357,14 +452,20 @@ int main(int argc, char* argv[])
     if (cusparseCreate(&handle) != CUSPARSE_STATUS_SUCCESS)
         throw std::runtime_error("Error running cusparseCreate function!");
 
+    csr.to_hyb(handle);
+
     std::fill(y, y + props.m, 0.0);
     if (cudaMemcpy(cy, y, props.m * sizeof(real_type), cudaMemcpyHostToDevice) != cudaSuccess)
         throw std::runtime_error("Error running cudaMemcpy function!");
     for (int iter = 0; iter < warmup_iters; iter++) 
-        csr.spmv_cusparse(cx, cy, handle);
+     // csr.spmv_cusparse_mp(cx, cy, handle); // available since CUDA 8.0
+     // csr.spmv_cusparse(cx, cy, handle);
+        csr.spmv_cusparse_hyb(cx, cy, handle);
     timer.start();
     for (int iter = 0; iter < n_iters; iter++) 
-        csr.spmv_cusparse(cx, cy, handle);
+     // csr.spmv_cusparse_mp(cx, cy, handle);
+     // csr.spmv_cusparse(cx, cy, handle);
+        csr.spmv_cusparse_hyb(cx, cy, handle);
     timer.stop();
     if (cudaMemcpy(y, cy, props.m * sizeof(real_type), cudaMemcpyDeviceToHost) != cudaSuccess)
         throw std::runtime_error("Error running cudaMemcpy function!");
