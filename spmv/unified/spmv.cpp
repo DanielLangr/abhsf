@@ -392,7 +392,7 @@ int main(int argc, char* argv[])
         props.symmetry = matrix_symmetry_t::UNSYMMETRIC;
         props.type = matrix_type_t::REAL;
         props.m = props.n = 200000000L;
-        props.nnz = props.m;
+        props.nnz = props.n;
 
         elements.reserve(props.nnz);
         for (size_t i = 0; i < props.n; i++)
