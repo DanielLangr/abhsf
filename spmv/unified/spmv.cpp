@@ -5,12 +5,15 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <numeric>
 #include <random>
 #include <string>
 #include <stdexcept>
 #include <tuple>
 #include <vector>
+
+#include <parallel/algorithm>
 
 #include <immintrin.h>
 
@@ -64,7 +67,8 @@ class csr_matrix
     public:
         void from_elements(elements_t& elements, const matrix_properties& props)
         {
-            std::sort(elements.begin(), elements.end());
+         // std::sort(elements.begin(), elements.end());
+            __gnu_parallel::sort(elements.begin(), elements.end());
 
             m_ = props.m;
             n_ = props.n;
@@ -221,7 +225,8 @@ class coo_matrix
     public:
         void from_elements(elements_t& elements, const matrix_properties& props)
         {
-            std::sort(elements.begin(), elements.end());
+         // std::sort(elements.begin(), elements.end());
+            __gnu_parallel::sort(elements.begin(), elements.end());
 
             m_ = props.m;
             n_ = props.n;
@@ -237,15 +242,37 @@ class coo_matrix
                 ja_[k] = std::get<1>(elements[k]);
             }
         }
-/*
+
         void spmv(const real_type* RESTRICT x, real_type* RESTRICT y)
         {
 #pragma omp parallel for
-            for (index_type row = 0; row < m_; row++) 
-                for (index_type k = ia_[row]; k < ia_[row + 1]; k++)
-                    y[row] += a_[k] * x[ja_[k]];
+            for (size_t k = 0; k < nnz_; k++)
+#pragma omp atomic update
+                y[ia_[k]] += a_[k] * x[ja_[k]];
         }
-*/
+
+        void spmv_map(const real_type* RESTRICT x, real_type* RESTRICT y)
+        {
+#pragma omp parallel
+            {
+                std::map<index_type, real_type> map;
+           
+#pragma omp for
+                for (size_t k = 0; k < nnz_; k++) {
+                    const index_type row = ia_[k];
+
+                    auto iter = map.find(row);
+                    if ((iter == map.end()) && (map.size() >= 16)) {
+                        for (auto jter = map.cbegin(); jter != map.cend(); jter++)
+#pragma omp atomic update
+                            y[jter->first] += jter->second;
+                        map.clear();
+                    }
+                    map[row] += a_[k] * x[ja_[k]];
+                }
+            }
+        }
+
 
 #ifdef HAVE_MKL
         void spmv_mkl(const real_type* RESTRICT x, real_type* RESTRICT y)
@@ -424,7 +451,7 @@ int main(int argc, char* argv[])
     A.from_elements(elements, props);
 
     timer_type timer;
-/*
+
     // naive 
     std::fill(y, y + props.m, 0.0);
     for (int iter = 0; iter < warmup_iters; iter++) 
@@ -434,7 +461,7 @@ int main(int argc, char* argv[])
         A.spmv(x, y);
     timer.stop();
     PRINT_RESULT("Measured MFLOP/s naive CSR:");
-*/
+/*
     // MKL 
 #ifdef HAVE_MKL
     std::fill(y, y + props.m, 0.0);
@@ -446,7 +473,7 @@ int main(int argc, char* argv[])
     timer.stop();
     PRINT_RESULT("Measured MFLOP/s MKL:");
 #endif
-
+*/
 #ifdef HAVE_CUDA
     cusparseHandle_t handle;
     if (cusparseCreate(&handle) != CUSPARSE_STATUS_SUCCESS)
