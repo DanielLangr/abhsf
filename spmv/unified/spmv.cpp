@@ -344,6 +344,7 @@ class coo_matrix
         index_type m_, n_, nnz_;
 };
 
+/*
 class delta_matrix
 {
     public:
@@ -425,6 +426,7 @@ class delta_matrix
                 uint64_t k = first + 1;
                 while (k <= last) {
                     uint64_t current = previous + (uint64_t)da_[k];
+                    previous = current;
 
                     uint64_t row_ = current >> 31;
                     col = current & ((1UL << 31) - 1);
@@ -442,6 +444,7 @@ class delta_matrix
                 }
                 while (k <= last) {
                     uint64_t current = previous + (uint64_t)da_[k];
+                    previous = current;
 
                     uint64_t row_ = current >> 31;
                     col = current & ((1UL << 31) - 1);
@@ -482,6 +485,221 @@ class delta_matrix
         std::vector<uint64_t> thread_last_index;
         std::vector<uint64_t> thread_first_current;
 };
+*/
+
+template <int K = 15>
+class delta_matrix
+{
+    public:
+        delta_matrix() : a_(nullptr), da_(nullptr) { }
+        ~delta_matrix() { release(); }
+
+        void from_elements(elements_t& elements, const matrix_properties& props)
+        {
+         // std::sort(elements.begin(), elements.end());
+            __gnu_parallel::sort(elements.begin(), elements.end());
+
+            m_ = props.m;
+            n_ = props.n;
+            nnz_ = elements.size();
+
+            posix_memalign((void**)(&a_), 64, nnz_ * sizeof(real_type));
+         // posix_memalign((void**)(&da_), 64, nnz_ * sizeof(uint32_t));
+            posix_memalign((void**)(&da_), 64, nnz_ * 8); // worst-case; TODO: calculate real space required
+
+#pragma omp parallel
+            {
+#pragma omp single
+                {
+                    thread_first_index.resize(omp_get_num_threads());
+                    thread_last_index.resize(omp_get_num_threads());
+                    thread_first_current.resize(omp_get_num_threads());
+                }
+
+                uint64_t T = (uint64_t)omp_get_num_threads();
+                uint64_t t = (uint64_t)omp_get_thread_num();
+
+                uint64_t per = nnz_ / T;
+                uint64_t first = t * per;
+                uint64_t last = first + per - 1;
+                if (last > (nnz_ - 1))
+                    last = nnz_ - 1;
+
+                thread_first_index[t] = first;
+                thread_last_index[t] = last;
+
+                uint64_t row = std::get<0>(elements[first]);
+                uint64_t col = std::get<1>(elements[first]);
+                uint64_t current = (row << K) + col;
+                thread_first_current[t] = current;
+
+                uint64_t previous = current;
+                uint8_t* addr = da_ + first * 8;
+                for (size_t k = first; k <= last; k++) {
+                    auto row = std::get<0>(elements[k]);
+                    auto col = std::get<1>(elements[k]);
+
+                    assert(row < (1UL << K));
+                    assert(col < (1UL << K));
+
+                    uint64_t current = (((uint64_t)row) << K) + (uint64_t)col;
+                    uint64_t delta = current - previous;
+
+                    if (delta <  (1UL << 6)) {
+                        uint8_t delta6 = (uint8_t)delta;
+                        *addr = delta;
+                        addr += 1;
+                    }
+                    else if (delta < (1UL << 14)) {
+                        uint16_t delta14 = (uint16_t)delta;
+                        delta14 |= (uint16_t)(1UL << 14);
+                        *((uint16_t*)addr) = delta14;
+                        addr += 2;
+                    }
+                    else if (delta < (1UL << 30)) {
+                        uint32_t delta30 = (uint32_t)delta;
+                        delta30 |= (uint32_t)(2UL << 30);
+                        *((uint32_t*)addr) = delta30;
+                        addr += 4;
+                    }
+                    else {
+                        uint64_t delta62 = delta;
+                        delta62 |= 3UL << 62;
+                        *((uint64_t*)addr) = delta62;
+                        addr += 8;
+                    }
+
+                    a_[k] = std::get<2>(elements[k]);
+                 // da_[k] = (uint32_t)delta;
+
+                    previous = current;
+                }
+            }
+        }
+
+        void spmv(const real_type* RESTRICT x, real_type* RESTRICT y)
+        {
+#pragma omp parallel
+            {
+                uint64_t t = (uint64_t)omp_get_thread_num();
+                uint64_t first = thread_first_index[t];
+                uint64_t last = thread_last_index[t];
+                uint64_t previous = thread_first_current[t];
+
+                uint64_t row = previous >> K; // first thread row
+                uint64_t col = previous & ((1UL << K) - 1);
+                real_type y_ = a_[first] * x[col];
+
+                uint64_t k = first + 1;
+                uint8_t* addr = da_ + first * 8;
+                while (k <= last) {
+                    uint8_t msb = *addr >> 6;
+                    uint64_t delta;
+                    if (msb == 0) {
+                        uint8_t delta6 = *addr;
+                        delta = (uint64_t)(delta6) & ((1UL << 6) - 1);
+                        addr += 1;
+                    }
+                    else if (msb == 1) {
+                        uint16_t delta14 = *((uint16_t*)addr);
+                        delta = (uint64_t)(delta14) & ((1UL << 14) - 1);
+                        addr += 2;
+                    }
+                    else if (msb == 2) {
+                        uint32_t delta30 = *((uint32_t*)addr);
+                        delta = (uint64_t)(delta30) & ((1UL << 30) - 1);
+                        addr += 4;
+                    }
+                    else {
+                        uint64_t delta62 = *((uint64_t*)addr);
+                        delta = delta62 & ((1UL << 62) - 1);
+                        addr += 8;
+                    }
+
+                    uint64_t current = previous + delta;
+                    previous = current;
+
+                    uint64_t row_ = current >> K;
+                    col = current & ((1UL << K) - 1);
+
+                    if (row_ != row) {
+#pragma omp atomic update
+                        y[row] += y_;
+                        row = row_;
+                        y_ = a_[k] * x[col];
+                        k++;
+                        break;
+                    }
+                    y_ += a_[k] * x[col];
+                    k++;
+                }
+                while (k <= last) {
+                    uint8_t msb = *addr >> 6;
+                    uint64_t delta;
+                    if (msb == 0) {
+                        uint8_t delta6 = *addr;
+                        delta = (uint64_t)(delta6) & ((1UL << 6) - 1);
+                        addr += 1;
+                    }
+                    else if (msb == 1) {
+                        uint16_t delta14 = *((uint16_t*)addr);
+                        delta = (uint64_t)(delta14) & ((1UL << 14) - 1);
+                        addr += 2;
+                    }
+                    else if (msb == 2) {
+                        uint32_t delta30 = *((uint32_t*)addr);
+                        delta = (uint64_t)(delta30) & ((1UL << 30) - 1);
+                        addr += 4;
+                    }
+                    else {
+                        uint64_t delta62 = *((uint64_t*)addr);
+                        delta = delta62 & ((1UL << 62) - 1);
+                        addr += 8;
+                    }
+
+                    uint64_t current = previous + delta;
+                    previous = current;
+
+                    uint64_t row_ = current >> K;
+                    col = current & ((1UL << K) - 1);
+
+                    if (row_ != row) {
+                        y[row] += y_;
+                        y_ = 0.0;
+                        row = row_;
+                    }
+                    y_ += a_[k] * x[col];
+                    k++;
+                }
+#pragma omp atomic update
+                y[row] += y_;
+            }
+        }
+
+        void release()
+        {
+            free(a_);
+            a_ = nullptr;
+            free(da_);
+            da_ = nullptr;
+
+            thread_first_index.clear();
+            thread_first_index.shrink_to_fit();
+            thread_last_index.clear();
+            thread_last_index.shrink_to_fit();
+            thread_first_current.clear();
+            thread_first_current.shrink_to_fit();
+        }
+
+    private:
+        uint64_t m_, n_, nnz_;
+        real_type* RESTRICT a_;
+     // uint32_t* RESTRICT da_;
+        uint8_t* RESTRICT da_;
+        std::vector<uint64_t> thread_first_index;
+        std::vector<uint64_t> thread_last_index;
+        std::vector<uint64_t> thread_first_current;
+};
 
 template <typename Iter>
 double result(Iter begin, Iter end)
@@ -505,7 +723,7 @@ int main(int argc, char* argv[])
 
         props.symmetry = matrix_symmetry_t::UNSYMMETRIC;
         props.type = matrix_type_t::REAL;
-        props.m = props.n = 2000;
+        props.m = props.n = 20000;
         props.nnz = props.m * props.n;
 
         elements.reserve(props.nnz);
@@ -629,7 +847,8 @@ int main(int argc, char* argv[])
 
  // csr_matrix A;
  // coo_matrix A;
-    delta_matrix A;
+ // delta_matrix A;
+    delta_matrix<15> A;
     A.from_elements(elements, props);
 
     timer_type timer;
