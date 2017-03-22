@@ -139,14 +139,26 @@ class csr_matrix
 
         void spmv(const real_type* RESTRICT x, real_type* RESTRICT y)
         {
-#pragma omp parallel for
-            for (index_type row = 0; row < m_; row++) 
-                for (index_type k = ia_[row]; k < ia_[row + 1]; k++)
+#pragma omp parallel for schedule(static)
+            for (index_type row = 0; row < m_; row++) {
+                index_type k = ia_[row];
+                while (k + 63 < ia_[row + 1]) {
+                    for (int i = 0; i < 64; i++)
+                        y[row] += x[ja_[k + i]];
+                    k += 64;
+                }
+                while (k < ia_[row + 1]) 
+                    y[row] += x[ja_[k++]];
+/*
+                for (index_type k = ia_[row]; k < ia_[row + 1]; k++) {
                  // y[row] += a_[k] * x[ja_[k]];
                     y[row] += x[ja_[k]];
+                }
+*/
+            }
         }
 
-
+/*
 #ifdef HAVE_MKL
         void spmv_mkl(const real_type* RESTRICT x, real_type* RESTRICT y)
         {
@@ -157,6 +169,7 @@ class csr_matrix
                     a_.data(), ja_.data(), ia_.data(), ia_.data() + 1, x, &alpha, y);
         }
 #endif
+*/
 
 #ifdef HAVE_CUDA
         void spmv_cusparse(const real_type* x, real_type* y, cusparseHandle_t handle)
@@ -215,7 +228,8 @@ class csr_matrix
     private:
         std::vector<real_type> a_;
         std::vector<index_type> ia_;
-        std::vector<index_type> ja_;
+     // std::vector<index_type> ja_;
+        std::vector<uint16_t> ja_;
         index_type m_, n_, nnz_;
 
 #ifdef HAVE_CUDA
@@ -227,6 +241,7 @@ class csr_matrix
 #endif
 };
 
+/*
 class coo_matrix
 {
     public:
@@ -270,7 +285,8 @@ class coo_matrix
                     last = nnz_ - 1;
 
                 long row = ia_[first];
-                real_type y_ = a_[first] * x[ja_[first]];
+             // real_type y_ = a_[first] * x[ja_[first]];
+                real_type y_ = x[ja_[first]];
 
                 long k = first + 1;
                 while (k <= last) {
@@ -278,11 +294,13 @@ class coo_matrix
 #pragma omp atomic update
                         y[row] += y_;
                         row = ia_[k];
-                        y_ = a_[k] * x[ja_[k]];
+                     // y_ = a_[k] * x[ja_[k]];
+                        y_ = x[ja_[k]];
                         k++;
                         break;
                     }
-                    y_ += a_[k] * x[ja_[k]];
+                 // y_ += a_[k] * x[ja_[k]];
+                    y_ += x[ja_[k]];
                     k++;
                 }
                 while (k <= last) {
@@ -291,48 +309,14 @@ class coo_matrix
                         y_ = 0.0;
                         row = ia_[k];
                     }
-                    y_ += a_[k] * x[ja_[k]];
+                 // y_ += a_[k] * x[ja_[k]];
+                    y_ += x[ja_[k]];
                     k++;
                 }
 #pragma omp atomic update
                 y[row] += y_;
             }
         }
-
-/*
-        void spmv_map(const real_type* RESTRICT x, real_type* RESTRICT y)
-        {
-#pragma omp parallel
-            {
-                std::map<index_type, real_type> map;
-           
-#pragma omp for
-                for (size_t k = 0; k < nnz_; k++) {
-                    const index_type row = ia_[k];
-
-                    auto iter = map.find(row);
-                    if ((iter == map.end()) && (map.size() >= 16)) {
-                        for (auto jter = map.cbegin(); jter != map.cend(); jter++)
-#pragma omp atomic update
-                            y[jter->first] += jter->second;
-                        map.clear();
-                    }
-                    map[row] += a_[k] * x[ja_[k]];
-                }
-            }
-        }
-*/
-
-#ifdef HAVE_MKL
-        void spmv_mkl(const real_type* RESTRICT x, real_type* RESTRICT y)
-        {
-            static const char transa = 'N';
-            static const double alpha = 1.0;
-            static const char matdescra[6] = { 'G', ' ', ' ', 'C', ' ', ' ' };
-            mkl_dcoomv(&transa, &m_, &n_, &alpha, matdescra, 
-                    a_.data(), ia_.data(), ja_.data(), &nnz_, x, &alpha, y);
-        }
-#endif
 
         void release()
         {
@@ -346,8 +330,151 @@ class coo_matrix
 
     private:
         std::vector<real_type> a_;
-        std::vector<index_type> ia_;
-        std::vector<index_type> ja_;
+     // std::vector<index_type> ia_, ja_;
+        std::vector<uint16_t> ia_, ja_;
+        index_type m_, n_, nnz_;
+};
+*/
+
+class coo_matrix
+{
+    public:
+        void from_elements(elements_t& elements, const matrix_properties& props)
+        {
+         // std::sort(elements.begin(), elements.end());
+            __gnu_parallel::sort(elements.begin(), elements.end());
+/*
+            __gnu_parallel::sort(elements.begin(), elements.end(),
+                    [](const element_t& a, const element_t& b) {
+                        long row_a = std::get<0>(a); long col_a = std::get<1>(a);
+                        long row_b = std::get<0>(b); long col_b = std::get<1>(b);
+
+                        assert(sizeof(real_type) == 8);
+                        static const long epcl = 64 / sizeof(real_type); // elements per cache line
+
+                        long block_row_a = row_a / epcl; long block_col_a = col_a / epcl;
+                        long block_row_b = row_b / epcl; long block_col_b = col_b / epcl;
+
+                        long local_row_a = row_a % epcl; long local_col_a = col_a % epcl;
+                        long local_row_b = row_b % epcl; long local_col_b = col_b % epcl;
+
+                        return (std::make_tuple(block_row_a, block_col_a, local_row_a, local_col_a)
+                                < std::make_tuple(block_row_b, block_col_b, local_row_b, local_col_b));
+                    });
+*/
+
+            m_ = props.m;
+            n_ = props.n;
+            nnz_ = elements.size();
+
+            a_.resize(nnz_);
+            ia_.resize(nnz_);
+            ja_.resize(nnz_);
+
+            for (size_t k = 0; k < nnz_; k++) {
+                a_[k] = std::get<2>(elements[k]);
+                ia_[k] = std::get<0>(elements[k]);
+                ja_[k] = std::get<1>(elements[k]);
+            }
+        }
+
+        void spmv_clever(const real_type* RESTRICT x, real_type* RESTRICT y)
+        {
+            const uint16_t* RESTRICT ja_ptr = ja_.data();
+
+#pragma omp parallel
+            {
+                // split work
+                long per = nnz_ / omp_get_num_threads();
+                long first = omp_get_thread_num() * per;
+                long last = first + per - 1;
+                if (last > (nnz_ - 1))
+                    last = nnz_ - 1;
+
+                long row = ia_[first];
+             // real_type y_ = a_[first] * x[ja_[first]];
+                real_type y_ = x[ja_[first]];
+
+                long k = first + 1;
+                while (k <= (last - 7)) {
+                    if (ia_[k] != row) {
+#pragma omp atomic update
+                        y[row] += y_;
+                        row = ia_[k];
+                     // y_ = a_[k] * x[ja_[k]];
+                        y_ = x[ja_[k]];
+                        k++;
+                        break;
+                    }
+                 // y_ += a_[k] * x[ja_[k]];
+                    y_ += x[ja_[k]];
+                    k++;
+                }
+                while (k <= (last - 7)) {
+                    if (ia_[k + 7] == row) { // next elements belong to same row
+/*
+                        for (int i = 0; i < 8; i++)
+                            y_ += x[ja_[k + i]];
+*/
+                        __m256i inds1 = _mm256_loadu_si256((__m256i*)(ja_ptr + k));
+                        __m256i inds2 = _mm256_unpackhi_epi64(inds1, inds1);
+
+                        inds1 = _mm256_cvtepu16_epi64(_mm256_castsi256_si128(inds1));
+                        inds2 = _mm256_cvtepu16_epi64(_mm256_castsi256_si128(inds2));
+
+                        __m256d x1 = _mm256_i64gather_pd(x, inds1, 8);
+                        __m256d x2 = _mm256_i64gather_pd(x, inds2, 8);
+
+                        __m256d temp = _mm256_hadd_pd(x1, x2);
+                        __m128d temp_high = _mm256_extractf128_pd(temp, 1);
+                        __m128d sum1 = _mm_add_pd(temp_high, _mm256_castpd256_pd128(temp));
+
+                        __m128d sum2 = _mm_unpackhi_pd(sum1, sum1);
+                        y_ += _mm_cvtsd_f64(sum2);
+                        y_ += _mm_cvtsd_f64(sum1);
+
+                        k += 8;
+                    }
+                    else {
+                        if (ia_[k] != row) {
+                            y[row] += y_;
+                            y_ = 0.0;
+                            row = ia_[k];
+                        }
+                     // y_ += a_[k] * x[ja_[k]];
+                        y_ += x[ja_[k]];
+                        k++;
+                    }
+                }
+                while (k <= last) {
+                    if (ia_[k] != row) {
+                        y[row] += y_;
+                        y_ = 0.0;
+                        row = ia_[k];
+                    }
+                 // y_ += a_[k] * x[ja_[k]];
+                    y_ += x[ja_[k]];
+                    k++;
+                }
+#pragma omp atomic update
+                y[row] += y_;
+            }
+        }
+
+        void release()
+        {
+            a_.clear();
+            a_.shrink_to_fit();
+            ia_.clear();
+            ia_.shrink_to_fit();
+            ja_.clear();
+            ja_.shrink_to_fit();
+        }
+
+    private:
+        std::vector<real_type> a_;
+     // std::vector<index_type> ia_, ja_;
+        std::vector<uint16_t> ia_, ja_;
         index_type m_, n_, nnz_;
 };
 
@@ -556,7 +683,7 @@ class delta_matrix
 
                 uint64_t row = std::get<0>(elements[first]);
                 uint64_t col = std::get<1>(elements[first]);
-                uint64_t current = ((row / 8) << (28 + 3 + 3))
+                uint64_t current = ((row / 8) << (25 + 3 + 3))
                     + ((col / 8) << (3 + 3)) + ((row % 8) << 3) + (col % 8);
                 thread_first_current[t] = current;
 
@@ -568,7 +695,7 @@ class delta_matrix
                     assert(row < (1UL << 31));
                     assert(col < (1UL << 31));
 
-                    uint64_t current = ((row / 8) << (28 + 3 + 3))
+                    uint64_t current = ((row / 8) << (25 + 3 + 3))
                         + ((col / 8) << (3 + 3)) + ((row % 8) << 3) + (col % 8);
                     uint64_t delta = current - previous;
 
@@ -592,8 +719,8 @@ class delta_matrix
                 uint64_t previous = thread_first_current[t];
 
                 // first thread block row
-                uint64_t block_row = previous >> (28 + 3 + 3);
-                uint64_t block_col = (previous >> (3 + 3)) & ((1UL << 28) - 1);
+                uint64_t block_row = previous >> (25 + 3 + 3);
+                uint64_t block_col = (previous >> (3 + 3)) & ((1UL << 25) - 1);
                 uint64_t local_row = (previous >> 3) & 7;
                 uint64_t local_col = previous & 7;
                 real_type* RESTRICT y_ptr = y + (block_row << 3);
@@ -608,8 +735,8 @@ class delta_matrix
                     uint64_t current = previous + (uint64_t)da_[k];
                     previous = current;
 
-                    uint64_t block_row_ = current >> (28 + 3 + 3);
-                    block_col = (current >> (3 + 3)) & ((1UL << 28) - 1);
+                    uint64_t block_row_ = current >> (25 + 3 + 3);
+                    block_col = (current >> (3 + 3)) & ((1UL << 25) - 1);
                     local_row = (current >> 3) & 7;
                     local_col = current & 7;
                     x_ptr = x + (block_col << 3);
@@ -635,12 +762,12 @@ class delta_matrix
                     uint64_t current = previous + (uint64_t)da_[k];
                     previous = current;
 
-                    uint64_t block_row_ = current >> (28 + 3 + 3);
-                    block_col = (current >> (3 + 3)) & ((1UL << 28) - 1);
+                 // uint64_t block_row_ = current >> (25 + 3 + 3);
+                    block_col = (current >> (3 + 3)) & ((1UL << 25) - 1);
                     local_row = (current >> 3) & 7;
                     local_col = current & 7;
                     x_ptr = x + (block_col << 3);
-
+/*
                     if (block_row_ != block_row) {
                         for (int i = 0; i < 7; i++) {
 #pragma omp atomic update
@@ -650,7 +777,8 @@ class delta_matrix
                         y_ptr = y + (block_row << 3);
                         for (int i = 0; i < 7; i++) y_[i] = 0.0;
                     }
-                    y_[local_row] = /* a_[k] * */ x_ptr[local_col];
+*/
+                    y_[local_row] += /* a_[k] * */ x_ptr[local_col];
                     k++;
                 }
                 for (int i = 0; i < 7; i++) {
@@ -1074,9 +1202,9 @@ int main(int argc, char* argv[])
 
     const double n_mflops = (double)(nnz_all * 2 * n_iters) / 1.0e6;
 
- // csr_matrix A;
+    csr_matrix A;
  // coo_matrix A;
-    delta_matrix A;
+ // delta_matrix A;
 /*
     DELTA_K(1); DELTA_K(2); DELTA_K(3); DELTA_K(4); DELTA_K(5); DELTA_K(6); DELTA_K(7); DELTA_K(8);
     DELTA_K(9); DELTA_K(10); DELTA_K(11); DELTA_K(12); DELTA_K(13); DELTA_K(14); DELTA_K(15); DELTA_K(16);

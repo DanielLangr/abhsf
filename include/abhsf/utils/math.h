@@ -24,7 +24,8 @@ T ceil_log2(T n)
         k++;
     
     assert((1UL << k) >= n);
-    assert((1UL << (k - 1)) < n);
+    if (k > 0)
+        assert((1UL << (k - 1)) < n);
 
     return k;
 }

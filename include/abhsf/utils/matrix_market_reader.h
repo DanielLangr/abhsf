@@ -143,7 +143,7 @@ void matrix_market_reader<T>::close()
 }
 
 template <typename ELEMENTS_T>
-void read_mtx_real(const std::string& filename, ELEMENTS_T& elements, matrix_properties& props) 
+void read_mtx_real_or_binary(const std::string& filename, ELEMENTS_T& elements, matrix_properties& props) 
 {
     std::cout << red << "Matrix market reader log..." << reset << std::endl;
 
@@ -152,8 +152,8 @@ void read_mtx_real(const std::string& filename, ELEMENTS_T& elements, matrix_pro
     
     props = reader.props();
 
-    if (props.type != matrix_type_t::REAL)
-        throw std::runtime_error("read_matrix_real() invoked for non-real matrix.");
+    if ((props.type != matrix_type_t::REAL) && (props.type != matrix_type_t::BINARY))
+        throw std::runtime_error("read_matrix_real_or_binary() invoked for non-real-non-binary matrix.");
 
     elements.reserve(props.nnz);
     bool warned = false; // check zero elements explicit storage :(
@@ -162,14 +162,20 @@ void read_mtx_real(const std::string& filename, ELEMENTS_T& elements, matrix_pro
     for (uintmax_t k = 0; k < props.nnz; k++) {
         uintmax_t row, col;
         double val_re;
-        reader.next_element(&row, &col, &val_re);
+
+        if (props.type != matrix_type_t::REAL)
+            reader.next_element(&row, &col, &val_re);
+        else {
+            reader.next_element(&row, &col);
+            val_re = 1.0;
+        }
 
         if (row > col)
             L = true;
         if (col > row)
             U = true;
 
-        if (val_re == 0.0) {
+        if ((props.type == matrix_type_t::REAL) && (val_re == 0.0)) {
             if (warned == false) {
                 std::cout << red << "Matrix file contains zero elements." << reset << std::endl;
                 warned = true;
@@ -189,7 +195,5 @@ void read_mtx_real(const std::string& filename, ELEMENTS_T& elements, matrix_pro
 
     std::cout << green << "... [DONE]" << reset << std::endl;
 }
-
-
 
 #endif
