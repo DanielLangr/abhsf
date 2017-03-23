@@ -232,6 +232,10 @@ int main(int argc, char* argv[])
     else // read from file if not synthetic
         read_mtx_real_or_binary(argv[1], elements, props);
 
+    // print out final dimensions
+    std::cout << "Matrix dimensions: " << magenta << 
+        props.m << " x " << props.n << " : " << props.nnz << " = " << elements.size() << reset << std::endl;
+
     // check matrix:
     if (props.symmetry != matrix_symmetry_t::UNSYMMETRIC)
         throw std::runtime_error("This program does support unsymmetric matrices only!");

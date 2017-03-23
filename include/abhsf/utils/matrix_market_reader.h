@@ -159,11 +159,12 @@ void read_mtx_real_or_binary(const std::string& filename, ELEMENTS_T& elements, 
     bool warned = false; // check zero elements explicit storage :(
     bool L = false; // check lower/upper triangular parts only for not-unsymmetric matrices
     bool U = false;
+    long zeros = 0;
     for (uintmax_t k = 0; k < props.nnz; k++) {
         uintmax_t row, col;
         double val_re;
 
-        if (props.type != matrix_type_t::REAL)
+        if (props.type == matrix_type_t::REAL)
             reader.next_element(&row, &col, &val_re);
         else {
             reader.next_element(&row, &col);
@@ -176,6 +177,7 @@ void read_mtx_real_or_binary(const std::string& filename, ELEMENTS_T& elements, 
             U = true;
 
         if ((props.type == matrix_type_t::REAL) && (val_re == 0.0)) {
+            zeros++;
             if (warned == false) {
                 std::cout << red << "Matrix file contains zero elements." << reset << std::endl;
                 warned = true;
@@ -184,6 +186,7 @@ void read_mtx_real_or_binary(const std::string& filename, ELEMENTS_T& elements, 
         else
             elements.emplace_back(row, col, val_re);
     }
+    props.nnz -= zeros;
 
     if (props.symmetry != matrix_symmetry_t::UNSYMMETRIC) {
         if ((L == true) && (U == true))

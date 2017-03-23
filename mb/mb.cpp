@@ -2,6 +2,8 @@
 #include <cstdlib>
 #include <iostream>
 
+#include <abhsf/utils/restrict.h>
+
 using clock_type = std::chrono::high_resolution_clock;
 
 int main()
@@ -9,11 +11,11 @@ int main()
  // static const size_t n = 16UL * (1UL << 20); // 16M elements
  // static const size_t n = 1UL << 30; // 1G elements
     static const size_t n = 1UL << 28; // 256M elements
-    static const int n_exp = 6;
+    static const int n_exp = 4;
 
-    double* restrict a = nullptr;
-    double* restrict b = nullptr;
-    double* restrict c = nullptr;
+    double* RESTRICT a = nullptr;
+    double* RESTRICT b = nullptr;
+    double* RESTRICT c = nullptr;
 
     posix_memalign((void**)(&a), 64, n * sizeof(double));
     posix_memalign((void**)(&b), 64, n * sizeof(double));
