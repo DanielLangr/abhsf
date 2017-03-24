@@ -7,6 +7,9 @@ CXXFLAGS = -I../../include
 CXXFLAGS += -std=c++11
 CXXFLAGS += -O3 -DNDEBUG
 
+CXXFLAGS += -DHAVE_PAPI -lpapi
+CXXFLAGS += -DHAVE_MKL
+
 MKLFLAGSIOMP = -L${MKLROOT}/lib/intel64 -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -liomp5 -lpthread
 MKLFLAGSGOMP = -L${MKLROOT}/lib/intel64 -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lgomp -lpthread
 
@@ -14,10 +17,10 @@ MKLFLAGSGOMP = -L${MKLROOT}/lib/intel64 -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_
 all: $(PROGRAMS)
 
 spmv_haswell-gnu: spmv.cpp
-	g++ $(CXXFLAGS) -DHAVE_MKL -fopenmp -march=haswell $(MKLFLAGSGOMP) -o $@ $<
+	g++ $(CXXFLAGS) -fopenmp -march=haswell $(MKLFLAGSGOMP) -o $@ $<
 
 spmv_haswell-intel: spmv.cpp
-	icpc $(CXXFLAGS) -DHAVE_MKL -qopenmp -xCORE-AVX2 -restrict $(MKLFLAGSIOMP) -o $@ $<
+	icpc $(CXXFLAGS) -qopenmp -xCORE-AVX2 -restrict $(MKLFLAGSIOMP) -o $@ $<
 
 .PHONY: clean
 clean:

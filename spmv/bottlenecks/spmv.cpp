@@ -4,6 +4,7 @@
 #include <cstring>
 #include <iomanip>
 #include <iostream>
+#include <locale>
 #include <numeric>
 #include <string>
 #include <stdexcept>
@@ -13,6 +14,10 @@
 #include <parallel/algorithm>
 
 #include <immintrin.h>
+
+#ifdef HAVE_PAPI
+    #include <papi.h>
+#endif
 
 #ifdef HAVE_MKL
     #include <mkl.h>
@@ -26,9 +31,10 @@
 #include <abhsf/utils/restrict.h>
 #include <abhsf/utils/synthetic.h>
 #include <abhsf/utils/timer.h>
+#include <abhsf/utils/thousands_separator.h>
 
-static const int warmup_iters = 8;
-static const int n_iters = 80;
+static const int warmup_iters = 4;
+static const int n_iters = 40;
 
 using element_t = std::tuple<int, int, double>;
 using elements_t = std::vector<element_t>;
@@ -47,7 +53,46 @@ class csr_matrix
 
         void spmv(const REAL_T* RESTRICT x, REAL_T* RESTRICT y)
         {
-            mkl_csr_spmv_helper<REAL_T>::spmv(m_, n_, a_.data(), ia_.data(), ja_.data(), x, y); // MKL version
+         // mkl_csr_spmv_helper<REAL_T>::spmv(m_, n_, a_.data(), ia_.data(), ja_.data(), x, y); // MKL version
+         // spmv_naive(x, y);
+            spmv_naive_1_nnz_per_row(x, y);
+        }
+
+        void spmv_naive(const REAL_T* RESTRICT x, REAL_T* RESTRICT y)
+        {
+            #pragma omp parallel for schedule(static)
+            for (long row = 0; row < m_; row++) 
+                for (long k = ia_[row]; k < ia_[row + 1]; k++) 
+                    y[row] += a_[k] * x[ja_[k]];
+        }
+
+        void spmv_naive_1_nnz_per_row(const REAL_T* RESTRICT x, REAL_T* RESTRICT y)
+        {
+/*
+            #pragma omp parallel for schedule(static)
+            for (long first_row = 0; first_row < m_; first_row += 8) {
+                _mm_prefetch((const char*)(x + ja_[first_row + 64 + 0]), _MM_HINT_T2);
+                _mm_prefetch((const char*)(x + ja_[first_row + 64 + 1]), _MM_HINT_T2);
+                _mm_prefetch((const char*)(x + ja_[first_row + 64 + 2]), _MM_HINT_T2);
+                _mm_prefetch((const char*)(x + ja_[first_row + 64 + 3]), _MM_HINT_T2);
+                _mm_prefetch((const char*)(x + ja_[first_row + 64 + 4]), _MM_HINT_T2);
+                _mm_prefetch((const char*)(x + ja_[first_row + 64 + 5]), _MM_HINT_T2);
+                _mm_prefetch((const char*)(x + ja_[first_row + 64 + 6]), _MM_HINT_T2);
+                _mm_prefetch((const char*)(x + ja_[first_row + 64 + 7]), _MM_HINT_T2);
+
+                for (long j = 0; j < 8; j++) {
+                    long row = first_row + j;
+                    long k = row; // ia_[row];
+                    y[row] += a_[k] * x[ja_[k]];
+                }
+            }
+*/
+
+            #pragma omp parallel for schedule(static)
+            for (long row = 0; row < m_; row++) {
+                long k = ia_[row];
+                y[row] += a_[k] * x[ja_[k]];
+            }
         }
 
 /*
@@ -198,6 +243,8 @@ double result(Iter begin, Iter end)
 
 int main(int argc, char* argv[])
 {
+    std::cout.imbue(std::locale(std::locale(), new thousands_separator));
+
     using real_type = double;
     using timer_type = chrono_timer<>;
 
@@ -261,7 +308,8 @@ int main(int argc, char* argv[])
     const long nnz = elements.size();
     const double n_mflops = (double)(nnz * 2 * n_iters) / 1.0e6;
 
-    csr_matrix<real_type, MKL_INT, MKL_INT> A; 
+ // csr_matrix<real_type, MKL_INT, MKL_INT> A; 
+    csr_matrix<real_type, int, int> A;
  // coo_matrix A;
 
     A.from_elements(elements, props);
@@ -271,8 +319,28 @@ int main(int argc, char* argv[])
     for (int iter = 0; iter < warmup_iters; iter++) 
         A.spmv(x, y);
     timer.start();
-    for (int iter = 0; iter < n_iters; iter++) 
+    for (int iter = 0; iter < n_iters - 1; iter++) 
         A.spmv(x, y);
+    // last iteration:
+#ifdef HAVE_PAPI
+    int papi_events[4] = { PAPI_L1_TCM, PAPI_L2_TCM, PAPI_L3_TCM, PAPI_TLB_DM };
+    long long papi_values[4];
+    PAPI_start_counters(papi_events, 4);
+#endif
+    A.spmv(x, y);
+#ifdef HAVE_PAPI
+    PAPI_stop_counters(papi_values, 4);
+    std::cout << "L1 cache misses: "
+        << magenta << std::right << std::setw(20) << papi_values[0] << reset << std::endl;
+    std::cout << "L2 cache misses: "
+        << magenta << std::right << std::setw(20) << papi_values[1] << reset << std::endl;
+    std::cout << "L3 cache misses: "
+        << magenta << std::right << std::setw(20) << papi_values[2] << reset << std::endl;
+    std::cout << "TLB misses:      "
+        << magenta << std::right << std::setw(20) << papi_values[3] << reset << std::endl;
+#endif
+
+
     timer.stop();
 
     // result
