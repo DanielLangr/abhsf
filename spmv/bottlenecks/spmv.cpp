@@ -51,11 +51,11 @@ class csr_matrix
             coo2csr(elements, m_, a_, ia_, ja_);
         }
 
-        void spmv(const REAL_T* RESTRICT x, REAL_T* RESTRICT y)
+        void spmv(const REAL_T* RESTRICT x, REAL_T* RESTRICT y, bool papi = false)
         {
          // mkl_csr_spmv_helper<REAL_T>::spmv(m_, n_, a_.data(), ia_.data(), ja_.data(), x, y); // MKL version
          // spmv_naive(x, y);
-            spmv_naive_1_nnz_per_row(x, y);
+            spmv_naive_1_nnz_per_row(x, y, papi);
         }
 
         void spmv_naive(const REAL_T* RESTRICT x, REAL_T* RESTRICT y)
@@ -66,7 +66,7 @@ class csr_matrix
                     y[row] += a_[k] * x[ja_[k]];
         }
 
-        void spmv_naive_1_nnz_per_row(const REAL_T* RESTRICT x, REAL_T* RESTRICT y)
+        void spmv_naive_1_nnz_per_row(const REAL_T* RESTRICT x, REAL_T* RESTRICT y, bool papi)
         {
 /*
             #pragma omp parallel for schedule(static)
@@ -87,13 +87,52 @@ class csr_matrix
                 }
             }
 */
+            long long l1_tcm = 0, l2_tcm = 0, l3_tcm = 0, tlb_dm = 0;
+            #pragma omp parallel reduction(+:l1_tcm,l2_tcm,l3_tcm,tlb_dm)
+            {
+#ifdef HAVE_PAPI
+             // int papi_events[4] = { PAPI_L1_TCM, PAPI_L2_TCM, PAPI_L3_TCM, PAPI_TLB_DM };
+                int papi_events[1] = { PAPI_L1_TCM };
+             // if (papi) 
+                    PAPI_start_counters(papi_events, 1);
+#endif
 
-            #pragma omp parallel for schedule(static)
-            for (long row = 0; row < m_; row++) {
-                long k = ia_[row];
-                y[row] += a_[k] * x[ja_[k]];
+                #pragma omp for schedule(static)
+                for (long row = 0; row < m_; row++) {
+                    long k = ia_[row];
+                    y[row] += a_[k] * x[ja_[k]];
+                }
+
+                /*
+#ifdef HAVE_PAPI
+                if (papi) {
+                    long long papi_values[4];
+                    PAPI_stop_counters(papi_values, 4);
+                    l1_tcm = papi_values[0];
+                    l2_tcm = papi_values[1];
+                    l3_tcm = papi_values[2];
+                    tlb_dm = papi_values[3];
+                }
+#endif
+                */
             }
+/*
+#ifdef HAVE_PAPI
+            if (papi) {
+                std::cout << "L1 cache misses: "
+                    << magenta << std::right << std::setw(20) << l1_tcm << reset << std::endl;
+                std::cout << "L2 cache misses: "
+                    << magenta << std::right << std::setw(20) << l2_tcm << reset << std::endl;
+                std::cout << "L3 cache misses: "
+                    << magenta << std::right << std::setw(20) << l3_tcm << reset << std::endl;
+                std::cout << "TLB misses:      "
+                    << magenta << std::right << std::setw(20) << tlb_dm << reset << std::endl;
+            }
+#endif
+*/
         }
+
+
 
 /*
         void spmv(const real_type* RESTRICT x, real_type* RESTRICT y)
@@ -322,25 +361,7 @@ int main(int argc, char* argv[])
     for (int iter = 0; iter < n_iters - 1; iter++) 
         A.spmv(x, y);
     // last iteration:
-#ifdef HAVE_PAPI
-    int papi_events[4] = { PAPI_L1_TCM, PAPI_L2_TCM, PAPI_L3_TCM, PAPI_TLB_DM };
-    long long papi_values[4];
-    PAPI_start_counters(papi_events, 4);
-#endif
-    A.spmv(x, y);
-#ifdef HAVE_PAPI
-    PAPI_stop_counters(papi_values, 4);
-    std::cout << "L1 cache misses: "
-        << magenta << std::right << std::setw(20) << papi_values[0] << reset << std::endl;
-    std::cout << "L2 cache misses: "
-        << magenta << std::right << std::setw(20) << papi_values[1] << reset << std::endl;
-    std::cout << "L3 cache misses: "
-        << magenta << std::right << std::setw(20) << papi_values[2] << reset << std::endl;
-    std::cout << "TLB misses:      "
-        << magenta << std::right << std::setw(20) << papi_values[3] << reset << std::endl;
-#endif
-
-
+    A.spmv(x, y, true);
     timer.stop();
 
     // result
