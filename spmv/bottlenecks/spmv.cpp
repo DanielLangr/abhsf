@@ -91,10 +91,10 @@ class csr_matrix
             #pragma omp parallel reduction(+:l1_tcm,l2_tcm,l3_tcm,tlb_dm)
             {
 #ifdef HAVE_PAPI
-             // int papi_events[4] = { PAPI_L1_TCM, PAPI_L2_TCM, PAPI_L3_TCM, PAPI_TLB_DM };
-                int papi_events[1] = { PAPI_L1_TCM };
-             // if (papi) 
-                    PAPI_start_counters(papi_events, 1);
+                if (papi) {
+                    int papi_events[4] = { PAPI_L1_TCM, PAPI_L2_TCM, PAPI_L3_TCM, PAPI_TLB_DM };
+                    PAPI_start_counters(papi_events, 4);
+                }
 #endif
 
                 #pragma omp for schedule(static)
@@ -103,7 +103,6 @@ class csr_matrix
                     y[row] += a_[k] * x[ja_[k]];
                 }
 
-                /*
 #ifdef HAVE_PAPI
                 if (papi) {
                     long long papi_values[4];
@@ -114,9 +113,8 @@ class csr_matrix
                     tlb_dm = papi_values[3];
                 }
 #endif
-                */
             }
-/*
+
 #ifdef HAVE_PAPI
             if (papi) {
                 std::cout << "L1 cache misses: "
@@ -129,7 +127,6 @@ class csr_matrix
                     << magenta << std::right << std::setw(20) << tlb_dm << reset << std::endl;
             }
 #endif
-*/
         }
 
 
@@ -282,6 +279,13 @@ double result(Iter begin, Iter end)
 
 int main(int argc, char* argv[])
 {
+#ifdef HAVE_PAPI
+    if (PAPI_library_init(PAPI_VER_CURRENT) != PAPI_VER_CURRENT)
+        throw std::runtime_error("Error initializing PAPI library!");
+    if (PAPI_thread_init(pthread_self) != PAPI_OK)
+        throw std::runtime_error("Error setting threading support for PAPI!");
+#endif
+
     std::cout.imbue(std::locale(std::locale(), new thousands_separator));
 
     using real_type = double;
