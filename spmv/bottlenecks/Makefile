@@ -7,7 +7,7 @@ CXXFLAGS = -I../../include
 CXXFLAGS += -std=c++11
 CXXFLAGS += -O3 -DNDEBUG
 
-CXXFLAGS += -DHAVE_PAPI -lpapi
+CXXFLAGS += -DHAVE_PAPI -lpapi -lpthread
 CXXFLAGS += -DHAVE_MKL
 
 MKLFLAGSIOMP = -L${MKLROOT}/lib/intel64 -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -liomp5 -lpthread

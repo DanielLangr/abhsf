@@ -15,10 +15,6 @@
 
 #include <immintrin.h>
 
-#ifdef HAVE_PAPI
-    #include <papi.h>
-#endif
-
 #ifdef HAVE_MKL
     #include <mkl.h>
     #include <abhsf/utils/mkl_csr_spmv_helper.h>
@@ -28,6 +24,7 @@
 #include <abhsf/utils/coo2csr.h>
 #include <abhsf/utils/matrix_properties.h>
 #include <abhsf/utils/matrix_market_reader.h>
+#include <abhsf/utils/papi_helper.h>
 #include <abhsf/utils/restrict.h>
 #include <abhsf/utils/synthetic.h>
 #include <abhsf/utils/timer.h>
@@ -51,11 +48,11 @@ class csr_matrix
             coo2csr(elements, m_, a_, ia_, ja_);
         }
 
-        void spmv(const REAL_T* RESTRICT x, REAL_T* RESTRICT y, bool papi = false)
+        void spmv(const REAL_T* RESTRICT x, REAL_T* RESTRICT y, bool measure = false)
         {
          // mkl_csr_spmv_helper<REAL_T>::spmv(m_, n_, a_.data(), ia_.data(), ja_.data(), x, y); // MKL version
          // spmv_naive(x, y);
-            spmv_naive_1_nnz_per_row(x, y, papi);
+            spmv_naive_1_nnz_per_row(x, y, measure);
         }
 
         void spmv_naive(const REAL_T* RESTRICT x, REAL_T* RESTRICT y)
@@ -66,7 +63,7 @@ class csr_matrix
                     y[row] += a_[k] * x[ja_[k]];
         }
 
-        void spmv_naive_1_nnz_per_row(const REAL_T* RESTRICT x, REAL_T* RESTRICT y, bool papi)
+        void spmv_naive_1_nnz_per_row(const REAL_T* RESTRICT x, REAL_T* RESTRICT y, bool measure)
         {
 /*
             #pragma omp parallel for schedule(static)
@@ -87,15 +84,9 @@ class csr_matrix
                 }
             }
 */
-            long long l1_tcm = 0, l2_tcm = 0, l3_tcm = 0, tlb_dm = 0;
-            #pragma omp parallel reduction(+:l1_tcm,l2_tcm,l3_tcm,tlb_dm)
+            #pragma omp parallel
             {
-#ifdef HAVE_PAPI
-                if (papi) {
-                    int papi_events[4] = { PAPI_L1_TCM, PAPI_L2_TCM, PAPI_L3_TCM, PAPI_TLB_DM };
-                    PAPI_start_counters(papi_events, 4);
-                }
-#endif
+                if (measure) papi_helper_start();
 
                 #pragma omp for schedule(static)
                 for (long row = 0; row < m_; row++) {
@@ -103,33 +94,10 @@ class csr_matrix
                     y[row] += a_[k] * x[ja_[k]];
                 }
 
-#ifdef HAVE_PAPI
-                if (papi) {
-                    long long papi_values[4];
-                    PAPI_stop_counters(papi_values, 4);
-                    l1_tcm = papi_values[0];
-                    l2_tcm = papi_values[1];
-                    l3_tcm = papi_values[2];
-                    tlb_dm = papi_values[3];
-                }
-#endif
+                if (measure) papi_helper_stop();
             }
-
-#ifdef HAVE_PAPI
-            if (papi) {
-                std::cout << "L1 cache misses: "
-                    << magenta << std::right << std::setw(20) << l1_tcm << reset << std::endl;
-                std::cout << "L2 cache misses: "
-                    << magenta << std::right << std::setw(20) << l2_tcm << reset << std::endl;
-                std::cout << "L3 cache misses: "
-                    << magenta << std::right << std::setw(20) << l3_tcm << reset << std::endl;
-                std::cout << "TLB misses:      "
-                    << magenta << std::right << std::setw(20) << tlb_dm << reset << std::endl;
-            }
-#endif
+            if (measure) papi_helper_print();
         }
-
-
 
 /*
         void spmv(const real_type* RESTRICT x, real_type* RESTRICT y)
@@ -279,17 +247,13 @@ double result(Iter begin, Iter end)
 
 int main(int argc, char* argv[])
 {
-#ifdef HAVE_PAPI
-    if (PAPI_library_init(PAPI_VER_CURRENT) != PAPI_VER_CURRENT)
-        throw std::runtime_error("Error initializing PAPI library!");
-    if (PAPI_thread_init(pthread_self) != PAPI_OK)
-        throw std::runtime_error("Error setting threading support for PAPI!");
-#endif
-
-    std::cout.imbue(std::locale(std::locale(), new thousands_separator));
-
     using real_type = double;
     using timer_type = chrono_timer<>;
+
+    papi_helper_init_thread();
+
+    // pretty print large numbers
+    std::cout.imbue(std::locale(std::locale(), new thousands_separator));
 
     matrix_properties props;
     elements_t elements;
@@ -358,14 +322,15 @@ int main(int argc, char* argv[])
     A.from_elements(elements, props);
     timer_type timer;
 
+    // warm-up:
     std::fill(y, y + props.m, 0.0);
-    for (int iter = 0; iter < warmup_iters; iter++) 
+    for (int iter = 0; iter < warmup_iters - 1; iter++) 
         A.spmv(x, y);
+    A.spmv(x, y, true); // last warm-up measured
+    // mesaurement:
     timer.start();
-    for (int iter = 0; iter < n_iters - 1; iter++) 
+    for (int iter = 0; iter < n_iters; iter++) 
         A.spmv(x, y);
-    // last iteration:
-    A.spmv(x, y, true);
     timer.stop();
 
     // result
